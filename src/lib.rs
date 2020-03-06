@@ -10,6 +10,7 @@ use core::{
 };
 use futures::ready;
 use void::Void;
+mod arrays;
 mod option;
 mod pass;
 mod result;
