@@ -43,10 +43,7 @@ where
         mut self: Pin<&mut Self>,
         cx: &mut Context,
         mut ctx: R,
-    ) -> Poll<Result<Self::Ok, Self::Error>>
-    where
-        Self: Sized,
-    {
+    ) -> Poll<Result<Self::Ok, Self::Error>> {
         let ctx = ctx.borrow_mut();
 
         let this = &mut *self;
@@ -101,10 +98,7 @@ where
         mut self: Pin<&mut Self>,
         cx: &mut Context,
         mut ctx: R,
-    ) -> Poll<Result<Self::Ok, Self::Error>>
-    where
-        Self: Sized,
-    {
+    ) -> Poll<Result<Self::Ok, Self::Error>> {
         let ctx = ctx.borrow_mut();
 
         let this = &mut *self;

@@ -1,4 +1,7 @@
-#![no_std]
+#![cfg_attr(not(feature = "std"), no_std)]
+
+#[cfg(feature = "alloc")]
+extern crate alloc;
 
 use core::{
     borrow::BorrowMut,
@@ -12,6 +15,9 @@ mod pass;
 mod result;
 pub use pass::Pass;
 
+#[cfg(feature = "alloc")]
+mod allocated;
+
 pub trait Future<C: ?Sized> {
     type Ok;
     type Error;
@@ -20,9 +26,7 @@ pub trait Future<C: ?Sized> {
         self: Pin<&mut Self>,
         cx: &mut Context,
         ctx: R,
-    ) -> Poll<Result<Self::Ok, Self::Error>>
-    where
-        Self: Sized;
+    ) -> Poll<Result<Self::Ok, Self::Error>>;
 }
 
 pub struct Ready<T> {
@@ -37,10 +41,7 @@ impl<C: ?Sized, T: Unpin> Future<C> for Ready<T> {
         mut self: Pin<&mut Self>,
         _: &mut Context,
         _: R,
-    ) -> Poll<Result<Self::Ok, Self::Error>>
-    where
-        Self: Sized,
-    {
+    ) -> Poll<Result<Self::Ok, Self::Error>> {
         Poll::Ready(Ok(self.data.take().expect("Ready polled after completion")))
     }
 }

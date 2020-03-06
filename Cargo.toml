@@ -6,4 +6,9 @@ edition = "2018"
 
 [dependencies]
 void = { version = "1.0.2", default-features = false }
-futures = { version = "0.3.4" }
+futures = { version = "0.3.4", default-features = false }
+
+[features]
+default = ["std", "alloc"]
+alloc = []
+std = ["alloc"]

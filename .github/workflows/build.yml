@@ -17,6 +17,10 @@ jobs:
         rustup update
     - name: Build
       run: cargo build
+    - name: Build for no_std
+      run: cargo build --no-default-features
+    - name: Build for alloc
+      run: cargo build --no-default-features --features alloc
     - name: Build documentation
       run: |
         cargo rustdoc
