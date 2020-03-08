@@ -12,6 +12,7 @@ use futures::ready;
 use void::Void;
 mod arrays;
 mod option;
+mod primitives;
 mod result;
 mod tuples;
 
