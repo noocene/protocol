@@ -12,9 +12,8 @@ use futures::ready;
 use void::Void;
 mod arrays;
 mod option;
-mod pass;
 mod result;
-pub use pass::Pass;
+mod tuples;
 
 #[cfg(feature = "alloc")]
 mod allocated;
