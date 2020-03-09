@@ -27,6 +27,7 @@ macro_rules! tuple_impls {
                 Done,
             }
 
+            #[derive(Debug)]
             pub enum $error<E, $first, $($ty,)+ $last> {
                 Transport(E),
                 $first($first),

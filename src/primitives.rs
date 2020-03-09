@@ -68,7 +68,7 @@ macro_rules! impl_primitives {
                 type Future = PrimitiveUnravel<Self>;
 
                 fn unravel(self) -> Self::Future {
-                    PrimitiveUnravel { data: None }
+                    PrimitiveUnravel { data: Some(self) }
                 }
             }
 
