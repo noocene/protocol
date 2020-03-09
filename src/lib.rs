@@ -5,6 +5,7 @@ extern crate alloc;
 
 use core::{
     borrow::BorrowMut,
+    future,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -78,6 +79,14 @@ pub trait Join<P>: Dispatch<P> {
     type Future: Future<Self, Ok = P>;
 
     fn join(&mut self, handle: Self::Handle) -> Self::Future;
+}
+
+pub trait Contextualize<F: Future<Self::Target>> {
+    type Target;
+    type Future: future::Future<Output = Result<F::Ok, F::Error>>;
+    type Output: Future<Self, Ok = Self::Future>;
+
+    fn contextualize(&mut self, future: F) -> Self::Output;
 }
 
 pub trait Write<T> {
