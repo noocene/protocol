@@ -2,6 +2,7 @@ use crate::{ready, Coalesce, Dispatch, Fork, Future, Join, Read, Unravel, Write}
 use arrayvec::{ArrayVec, IntoIter};
 use core::{
     borrow::BorrowMut,
+    iter::Rev,
     mem::replace,
     pin::Pin,
     task::{Context, Poll},
@@ -15,7 +16,7 @@ macro_rules! array_impl {
                 handles: ArrayVec<[C::Handle; $len]>,
                 targets: ArrayVec<[C::Target; $len]>,
                 state: IteratorUnravelState,
-                data: IntoIter<[T; $len]>,
+                data: Rev<IntoIter<[T; $len]>>,
             }
 
             pub struct $coalesce<T, C: ?Sized + Read<[<C as Dispatch<T>>::Handle; $len]> + Join<T> + Unpin>
@@ -146,7 +147,7 @@ macro_rules! array_impl {
                 type Future = $unravel<T, C>;
 
                 fn unravel(self) -> Self::Future {
-                    let data = ArrayVec::from(self).into_iter();
+                    let data = ArrayVec::from(self).into_iter().rev();
 
                     $unravel {
                         fork: None,

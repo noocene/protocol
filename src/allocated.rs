@@ -2,7 +2,7 @@ use crate::{ready, Coalesce, Dispatch, Fork, Future, Join, Read, Unravel, Write}
 use alloc::vec::{IntoIter, Vec};
 use core::{
     borrow::BorrowMut,
-    iter::FromIterator,
+    iter::{FromIterator, Rev},
     marker::PhantomData,
     mem::replace,
     pin::Pin,
@@ -176,10 +176,10 @@ where
     C::Future: Unpin,
     C::Target: Unpin,
 {
-    type Future = IteratorUnravel<Vec<T>, C>;
+    type Future = IteratorUnravel<Rev<IntoIter<T>>, C>;
 
     fn unravel(self) -> Self::Future {
-        let data = self.into_iter();
+        let data = self.into_iter().rev();
 
         IteratorUnravel {
             fork: None,
