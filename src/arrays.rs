@@ -13,6 +13,7 @@ macro_rules! array_impl {
             pub struct $unravel<T, C: ?Sized + Write<[<C as Dispatch<T>>::Handle; $len]> + Fork<T>> {
                 fork: Option<C::Future>,
                 handles: ArrayVec<[C::Handle; $len]>,
+                targets: ArrayVec<[C::Target; $len]>,
                 state: IteratorUnravelState,
                 data: IntoIter<[T; $len]>,
             }
@@ -28,10 +29,11 @@ macro_rules! array_impl {
                 for $unravel<T, C>
             where
                 C::Handle: Unpin,
+                C::Target: Unpin,
                 C::Future: Unpin,
             {
                 type Ok = ();
-                type Error = IteratorError<C::Error, <C::Future as Future<C>>::Error>;
+                type Error = IteratorUnravelError<C::Error, <C::Future as Future<C>>::Error, <C::Target as Future<C>>::Error>;
 
                 fn poll<R: BorrowMut<C>>(
                     mut self: Pin<&mut Self>,
@@ -44,9 +46,10 @@ macro_rules! array_impl {
 
                     loop {
                         if let Some(future) = this.fork.as_mut() {
-                            let handle = ready!(Pin::new(future).poll(cx, &mut *ctx))
-                                .map_err(IteratorError::Dispatch)?;
+                            let (target, handle) = ready!(Pin::new(future).poll(cx, &mut *ctx))
+                                .map_err(IteratorUnravelError::Dispatch)?;
                             this.handles.push(handle);
+                            this.targets.push(target);
                             this.fork.take();
                         } else if let Some(item) = this.data.next() {
                             this.fork = Some(ctx.fork(item));
@@ -54,18 +57,29 @@ macro_rules! array_impl {
                             let mut ctx = Pin::new(&mut *ctx);
                             match this.state {
                                 IteratorUnravelState::Writing => {
-                                    ready!(ctx.as_mut().poll_ready(cx)).map_err(IteratorError::Transport)?;
+                                    ready!(ctx.as_mut().poll_ready(cx)).map_err(IteratorUnravelError::Transport)?;
                                     ctx.write(
                                         replace(&mut this.handles, ArrayVec::new())
                                             .into_inner()
                                             .unwrap_or_else(|_| panic!("handles incomplete")),
                                     )
-                                    .map_err(IteratorError::Transport)?;
+                                    .map_err(IteratorUnravelError::Transport)?;
                                     this.state = IteratorUnravelState::Flushing;
                                 }
                                 IteratorUnravelState::Flushing => {
-                                    ready!(ctx.as_mut().poll_flush(cx)).map_err(IteratorError::Transport)?;
-                                    this.state = IteratorUnravelState::Done;
+                                    ready!(ctx.as_mut().poll_flush(cx))
+                                        .map_err(IteratorUnravelError::Transport)?;
+                                    this.state = IteratorUnravelState::Targets;
+                                }
+                                IteratorUnravelState::Targets => {
+                                    if let Some(target) = this.targets.last_mut() {
+                                        ready!(Pin::new(target).poll(cx, &mut *ctx))
+                                            .map_err(IteratorUnravelError::Target)?;
+                                        this.targets.pop();
+                                    } else {
+                                        this.state = IteratorUnravelState::Done;
+                                        return Poll::Ready(Ok(()));
+                                    }
                                 }
                                 IteratorUnravelState::Done => panic!("IteratorUnravel polled after completion"),
                             }
@@ -82,7 +96,7 @@ macro_rules! array_impl {
                 T: Unpin,
             {
                 type Ok = [T; $len];
-                type Error = IteratorError<C::Error, <C::Future as Future<C>>::Error>;
+                type Error = IteratorCoalesceError<C::Error, <C::Future as Future<C>>::Error>;
 
                 fn poll<R: BorrowMut<C>>(
                     mut self: Pin<&mut Self>,
@@ -100,7 +114,7 @@ macro_rules! array_impl {
                         if let Some(handles) = &mut this.handles {
                             if let Some(future) = this.join.as_mut() {
                                 let handle = ready!(Pin::new(future).poll(cx, &mut *ctx))
-                                    .map_err(IteratorError::Dispatch)?;
+                                    .map_err(IteratorCoalesceError::Dispatch)?;
                                 this.data.push(handle);
                                 this.join.take();
                             } else if let Some(handle) = handles.next() {
@@ -113,7 +127,7 @@ macro_rules! array_impl {
                         } else {
                             this.handles = Some(
                                 ArrayVec::from(
-                                    ready!(Pin::new(&mut *ctx).read(cx)).map_err(IteratorError::Transport)?,
+                                    ready!(Pin::new(&mut *ctx).read(cx)).map_err(IteratorCoalesceError::Transport)?,
                                 )
                                 .into_iter(),
                             );
@@ -125,6 +139,7 @@ macro_rules! array_impl {
             impl<T, C: ?Sized + Write<[<C as Dispatch<T>>::Handle; $len]> + Fork<T> + Unpin> Unravel<C> for [T; $len]
             where
                 T: Unpin,
+                C::Target: Unpin,
                 C::Handle: Unpin,
                 C::Future: Unpin,
             {
@@ -136,6 +151,7 @@ macro_rules! array_impl {
                     $unravel {
                         fork: None,
                         handles: ArrayVec::new(),
+                        targets: ArrayVec::new(),
                         data,
                         state: IteratorUnravelState::Writing,
                     }
@@ -164,11 +180,19 @@ macro_rules! array_impl {
 enum IteratorUnravelState {
     Writing,
     Flushing,
+    Targets,
     Done,
 }
 
 #[derive(Debug)]
-pub enum IteratorError<T, U> {
+pub enum IteratorUnravelError<T, U, V> {
+    Transport(T),
+    Dispatch(U),
+    Target(V),
+}
+
+#[derive(Debug)]
+pub enum IteratorCoalesceError<T, U> {
     Transport(T),
     Dispatch(U),
 }

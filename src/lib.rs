@@ -68,7 +68,8 @@ pub trait Dispatch<P> {
 }
 
 pub trait Fork<P>: Dispatch<P> {
-    type Future: Future<Self, Ok = Self::Handle>;
+    type Target: Future<Self, Ok = ()>;
+    type Future: Future<Self, Ok = (Self::Target, Self::Handle)>;
 
     fn fork(&mut self, item: P) -> Self::Future;
 }

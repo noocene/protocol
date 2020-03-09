@@ -13,8 +13,9 @@ pub enum OptionUnravel<
     Some(T),
     None,
     Fork(C::Future),
-    Write(C::Handle),
-    Flush,
+    Target(C::Target),
+    Write(C::Handle, C::Target),
+    Flush(Option<C::Target>),
     Done,
 }
 
@@ -40,7 +41,14 @@ impl<T: Unpin, C: ?Sized + Write<Option<<C as Dispatch<T>>::Handle>> + Fork<T> +
 }
 
 #[derive(Debug)]
-pub enum OptionError<T, U> {
+pub enum OptionUnravelError<T, U, V> {
+    Transport(T),
+    Dispatch(U),
+    Target(V),
+}
+
+#[derive(Debug)]
+pub enum OptionCoalesceError<T, U> {
     Transport(T),
     Dispatch(U),
 }
@@ -49,10 +57,15 @@ impl<T: Unpin, C: ?Sized + Write<Option<<C as Dispatch<T>>::Handle>> + Fork<T> +
     for OptionUnravel<T, C>
 where
     C::Future: Unpin,
+    C::Target: Unpin,
     C::Handle: Unpin,
 {
     type Ok = ();
-    type Error = OptionError<C::Error, <C::Future as Future<C>>::Error>;
+    type Error = OptionUnravelError<
+        C::Error,
+        <C::Future as Future<C>>::Error,
+        <C::Target as Future<C>>::Error,
+    >;
 
     fn poll<R: BorrowMut<C>>(
         mut self: Pin<&mut Self>,
@@ -67,9 +80,9 @@ where
             match this {
                 OptionUnravel::None => {
                     let mut ctx = Pin::new(&mut *ctx);
-                    ready!(ctx.as_mut().poll_ready(cx)).map_err(OptionError::Transport)?;
-                    ctx.write(None).map_err(OptionError::Transport)?;
-                    replace(this, OptionUnravel::Flush);
+                    ready!(ctx.as_mut().poll_ready(cx)).map_err(OptionUnravelError::Transport)?;
+                    ctx.write(None).map_err(OptionUnravelError::Transport)?;
+                    replace(this, OptionUnravel::Flush(None));
                 }
                 OptionUnravel::Some(_) => {
                     let data = replace(this, OptionUnravel::Done);
@@ -80,23 +93,40 @@ where
                     }
                 }
                 OptionUnravel::Fork(future) => {
-                    let handle = ready!(Pin::new(&mut *future).poll(cx, &mut *ctx))
-                        .map_err(OptionError::Dispatch)?;
-                    replace(this, OptionUnravel::Write(handle));
+                    let (target, handle) = ready!(Pin::new(&mut *future).poll(cx, &mut *ctx))
+                        .map_err(OptionUnravelError::Dispatch)?;
+                    replace(this, OptionUnravel::Write(handle, target));
                 }
-                OptionUnravel::Write(_) => {
+                OptionUnravel::Write(_, _) => {
                     let mut ctx = Pin::new(&mut *ctx);
-                    ready!(ctx.as_mut().poll_ready(cx)).map_err(OptionError::Transport)?;
+                    ready!(ctx.as_mut().poll_ready(cx)).map_err(OptionUnravelError::Transport)?;
                     let data = replace(this, OptionUnravel::Done);
-                    if let OptionUnravel::Write(data) = data {
-                        ctx.write(Some(data)).map_err(OptionError::Transport)?;
-                        replace(this, OptionUnravel::Flush);
+                    if let OptionUnravel::Write(data, target) = data {
+                        ctx.write(Some(data))
+                            .map_err(OptionUnravelError::Transport)?;
+                        replace(this, OptionUnravel::Flush(Some(target)));
                     } else {
                         panic!("invalid state in OptionUnravel Write")
                     }
                 }
-                OptionUnravel::Flush => {
-                    ready!(Pin::new(&mut *ctx).poll_ready(cx)).map_err(OptionError::Transport)?;
+                OptionUnravel::Flush(_) => {
+                    ready!(Pin::new(&mut *ctx).poll_ready(cx))
+                        .map_err(OptionUnravelError::Transport)?;
+                    let data = replace(this, OptionUnravel::Done);
+                    if let OptionUnravel::Flush(target) = data {
+                        if let Some(target) = target {
+                            replace(this, OptionUnravel::Target(target));
+                        } else {
+                            replace(this, OptionUnravel::Done);
+                            return Poll::Ready(Ok(()));
+                        }
+                    } else {
+                        panic!("invalid state in OptionUnravel Write")
+                    }
+                }
+                OptionUnravel::Target(future) => {
+                    ready!(Pin::new(&mut *future).poll(cx, &mut *ctx))
+                        .map_err(OptionUnravelError::Target)?;
                     replace(this, OptionUnravel::Done);
                     return Poll::Ready(Ok(()));
                 }
@@ -113,7 +143,7 @@ where
     C::Handle: Unpin,
 {
     type Ok = Option<T>;
-    type Error = OptionError<C::Error, <C::Future as Future<C>>::Error>;
+    type Error = OptionCoalesceError<C::Error, <C::Future as Future<C>>::Error>;
 
     fn poll<R: BorrowMut<C>>(
         mut self: Pin<&mut Self>,
@@ -128,7 +158,7 @@ where
             match this {
                 OptionCoalesce::Read => {
                     let mut ctx = Pin::new(&mut *ctx);
-                    match ready!(ctx.as_mut().read(cx)).map_err(OptionError::Transport)? {
+                    match ready!(ctx.as_mut().read(cx)).map_err(OptionCoalesceError::Transport)? {
                         None => {
                             replace(this, OptionCoalesce::Done);
                             return Poll::Ready(Ok(None));
@@ -141,7 +171,7 @@ where
                 OptionCoalesce::Join(future) => {
                     return Poll::Ready(Ok(Some(
                         ready!(Pin::new(future).poll(cx, &mut *ctx))
-                            .map_err(OptionError::Dispatch)?,
+                            .map_err(OptionCoalesceError::Dispatch)?,
                     )));
                 }
                 OptionCoalesce::Done => panic!("OptionUnravel polled after completion"),
@@ -154,6 +184,7 @@ impl<T: Unpin, C: ?Sized + Write<Option<<C as Dispatch<T>>::Handle>> + Fork<T> +
     for Option<T>
 where
     C::Future: Unpin,
+    C::Target: Unpin,
     C::Handle: Unpin,
 {
     type Future = OptionUnravel<T, C>;
