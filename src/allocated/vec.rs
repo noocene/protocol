@@ -1,4 +1,7 @@
-use crate::{ready, Coalesce, Dispatch, Fork, Future, Join, Read, Unravel, Write};
+use crate::{
+    future::unordered::{EventualUnordered, EventualUnorderedError},
+    ready, Coalesce, Dispatch, Fork, Future, Join, Read, Unravel, Write,
+};
 use alloc::vec::{IntoIter, Vec};
 use core::{
     borrow::BorrowMut,
@@ -22,7 +25,7 @@ pub struct IteratorUnravel<
 > {
     fork: Option<C::Future>,
     handles: Vec<C::Handle>,
-    targets: Vec<C::Target>,
+    targets: EventualUnordered<Vec<C::Target>>,
     state: IteratorUnravelState,
     data: T::IntoIter,
 }
@@ -82,7 +85,7 @@ where
                 let (target, handle) = ready!(Pin::new(future).poll(cx, &mut *ctx))
                     .map_err(IteratorUnravelError::Dispatch)?;
                 this.handles.push(handle);
-                this.targets.push(target);
+                this.targets.data().unwrap().push(target);
                 this.fork.take();
             } else if let Some(item) = this.data.next() {
                 this.fork = Some(ctx.fork(item));
@@ -99,17 +102,16 @@ where
                     IteratorUnravelState::Flushing => {
                         ready!(ct.as_mut().poll_flush(cx))
                             .map_err(IteratorUnravelError::Transport)?;
+                        this.targets.complete();
                         this.state = IteratorUnravelState::Targets;
                     }
                     IteratorUnravelState::Targets => {
-                        if let Some(target) = this.targets.last_mut() {
-                            ready!(Pin::new(target).poll(cx, &mut *ctx))
-                                .map_err(IteratorUnravelError::Target)?;
-                            this.targets.pop();
-                        } else {
-                            this.state = IteratorUnravelState::Done;
-                            return Poll::Ready(Ok(()));
-                        }
+                        ready!(Pin::new(&mut this.targets)
+                            .poll(cx, &mut *ctx)
+                            .map_err(EventualUnorderedError::unwrap_complete)
+                            .map_err(IteratorUnravelError::Target))?;
+                        this.state = IteratorUnravelState::Done;
+                        return Poll::Ready(Ok(()));
                     }
                     IteratorUnravelState::Done => panic!("IteratorUnravel polled after completion"),
                 }
@@ -184,7 +186,7 @@ where
         IteratorUnravel {
             fork: None,
             handles: Vec::with_capacity(data.size_hint().0),
-            targets: Vec::with_capacity(data.size_hint().0),
+            targets: EventualUnordered::new(Vec::with_capacity(data.size_hint().0)),
             data,
             state: IteratorUnravelState::Writing,
         }

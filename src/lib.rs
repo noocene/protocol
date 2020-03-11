@@ -4,14 +4,14 @@
 extern crate alloc;
 
 use core::{
-    borrow::BorrowMut,
-    future,
+    future as cfuture,
     pin::Pin,
     task::{Context, Poll},
 };
 use futures::ready;
-use void::Void;
 mod arrays;
+pub mod future;
+pub use future::Future;
 mod option;
 mod primitives;
 mod result;
@@ -19,38 +19,6 @@ mod tuples;
 
 #[cfg(feature = "alloc")]
 mod allocated;
-
-pub trait Future<C: ?Sized> {
-    type Ok;
-    type Error;
-
-    fn poll<R: BorrowMut<C>>(
-        self: Pin<&mut Self>,
-        cx: &mut Context,
-        ctx: R,
-    ) -> Poll<Result<Self::Ok, Self::Error>>;
-}
-
-pub struct Ready<T> {
-    data: Option<T>,
-}
-
-impl<C: ?Sized, T: Unpin> Future<C> for Ready<T> {
-    type Ok = T;
-    type Error = Void;
-
-    fn poll<R: BorrowMut<C>>(
-        mut self: Pin<&mut Self>,
-        _: &mut Context,
-        _: R,
-    ) -> Poll<Result<Self::Ok, Self::Error>> {
-        Poll::Ready(Ok(self.data.take().expect("Ready polled after completion")))
-    }
-}
-
-pub fn ready<T>(data: T) -> Ready<T> {
-    Ready { data: Some(data) }
-}
 
 pub trait Unravel<C: ?Sized> {
     type Future: Future<C, Ok = ()>;
@@ -81,9 +49,12 @@ pub trait Join<P>: Dispatch<P> {
     fn join(&mut self, handle: Self::Handle) -> Self::Future;
 }
 
-pub trait Contextualize<F: Future<Self::Target>> {
+pub trait Contextualizer {
     type Target;
-    type Future: future::Future<Output = Result<F::Ok, F::Error>>;
+}
+
+pub trait Contextualize<F: Future<Self::Target>>: Contextualizer {
+    type Future: cfuture::Future<Output = Result<F::Ok, F::Error>>;
     type Output: Future<Self, Ok = Self::Future>;
 
     fn contextualize(&mut self, future: F) -> Self::Output;

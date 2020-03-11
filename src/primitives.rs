@@ -1,10 +1,14 @@
-use crate::{ready, Coalesce, Future, Read, Ready, Unravel, Write};
+use crate::{
+    future::{ready, Ready},
+    Coalesce, Future, Read, Unravel, Write,
+};
 use core::{
     borrow::BorrowMut,
     marker::PhantomData,
     pin::Pin,
     task::{Context, Poll},
 };
+use futures::ready;
 
 pub struct PrimitiveUnravel<T> {
     data: Option<T>,
