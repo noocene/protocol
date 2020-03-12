@@ -1,5 +1,5 @@
 use crate::{
-    future::unordered::{EventualUnordered, EventualUnorderedError},
+    future::ordered::{EventualOrdered, EventualOrderedError},
     ready, Coalesce, Dispatch, Fork, Future, Join, Read, Unravel, Write,
 };
 use arrayvec::{ArrayVec, IntoIter};
@@ -19,7 +19,7 @@ macro_rules! array_impl {
             pub struct $unravel<T, C: ?Sized + Write<[<C as Dispatch<T>>::Handle; $len]> + Fork<T>> {
                 fork: Option<C::Future>,
                 handles: ArrayVec<[C::Handle; $len]>,
-                targets: EventualUnordered<ArrayVec<[C::Target; $len]>>,
+                targets: EventualOrdered<ArrayVec<[C::Target; $len]>>,
                 state: ArrayUnravelState,
                 data: Rev<IntoIter<[T; $len]>>,
             }
@@ -81,7 +81,7 @@ macro_rules! array_impl {
                                 ArrayUnravelState::Targets => {
                                     ready!(Pin::new(&mut this.targets)
                                         .poll(cx, &mut *ctx)
-                                        .map_err(EventualUnorderedError::unwrap_complete)
+                                        .map_err(EventualOrderedError::unwrap_complete)
                                         .map_err(ArrayUnravelError::Target))?;
                                     this.state = ArrayUnravelState::Done;
                                     return Poll::Ready(Ok(()));
@@ -156,7 +156,7 @@ macro_rules! array_impl {
                     $unravel {
                         fork: None,
                         handles: ArrayVec::new(),
-                        targets: EventualUnordered::new(ArrayVec::new()),
+                        targets: EventualOrdered::new(ArrayVec::new()),
                         data,
                         state: ArrayUnravelState::Writing,
                     }

@@ -1,5 +1,5 @@
 use crate::{
-    future::unordered::{EventualUnordered, EventualUnorderedError},
+    future::ordered::{EventualOrdered, EventualOrderedError},
     ready, Coalesce, Dispatch, Fork, Future, Join, Read, Unravel, Write,
 };
 use alloc::vec::{IntoIter, Vec};
@@ -27,7 +27,7 @@ pub struct VecUnravel<
 > {
     fork: Option<C::Future>,
     handles: Vec<C::Handle>,
-    targets: EventualUnordered<Vec<C::Target>>,
+    targets: EventualOrdered<Vec<C::Target>>,
     state: VecUnravelState,
     data: T::IntoIter,
 }
@@ -121,7 +121,7 @@ where
                     VecUnravelState::Targets => {
                         ready!(Pin::new(&mut this.targets)
                             .poll(cx, &mut *ctx)
-                            .map_err(EventualUnorderedError::unwrap_complete)
+                            .map_err(EventualOrderedError::unwrap_complete)
                             .map_err(VecUnravelError::Target))?;
                         this.state = VecUnravelState::Done;
                         return Poll::Ready(Ok(()));
@@ -199,7 +199,7 @@ where
         VecUnravel {
             fork: None,
             handles: Vec::with_capacity(data.size_hint().0),
-            targets: EventualUnordered::new(Vec::with_capacity(data.size_hint().0)),
+            targets: EventualOrdered::new(Vec::with_capacity(data.size_hint().0)),
             data,
             state: VecUnravelState::Writing,
         }

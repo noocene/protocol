@@ -1,52 +1,54 @@
 use super::Future;
-use arrayvec::ArrayVec;
+use arrayvec::{ArrayVec, IntoIter};
 use core::{
     borrow::BorrowMut,
+    iter::Rev,
     mem::replace,
     pin::Pin,
     task::{Context, Poll},
 };
 use core_error::Error;
+use futures::ready;
 use thiserror::Error;
 
 pub trait Futures {
     type Data;
 }
 
-pub enum EventualUnordered<T: Futures> {
+pub enum EventualOrdered<T: Futures> {
     None,
     Incomplete(T),
-    Complete(Unordered<T>),
+    Complete(Ordered<T>),
 }
 
 #[derive(Debug, Error)]
-#[error("attempted to read data from EventualUnordered after completion")]
+#[error("attempted to read data from EventualOrdered after completion")]
 pub struct Complete(());
 
-impl<T: Futures> EventualUnordered<T> {
+impl<T: Futures> EventualOrdered<T> {
     pub fn new(input: T) -> Self {
-        EventualUnordered::Incomplete(input)
+        EventualOrdered::Incomplete(input)
     }
 
     pub fn complete(&mut self) -> bool
     where
-        Unordered<T>: From<T>,
+        Ordered<T>: From<T>,
     {
-        match replace(self, EventualUnordered::None) {
-            EventualUnordered::None => panic!("invalid state"),
-            EventualUnordered::Incomplete(incomplete) => {
-                *self = EventualUnordered::Complete(incomplete.into());
+        match replace(self, EventualOrdered::None) {
+            EventualOrdered::None => panic!("invalid state"),
+            EventualOrdered::Incomplete(incomplete) => {
+                *self = EventualOrdered::Complete(incomplete.into());
                 true
             }
-            EventualUnordered::Complete(data) => {
-                *self = EventualUnordered::Complete(data);
+            EventualOrdered::Complete(data) => {
+                *self = EventualOrdered::Complete(data);
                 false
             }
         }
     }
 
     pub fn data(&mut self) -> Result<&mut T, Complete> {
-        if let EventualUnordered::Incomplete(data) = self {
+        if let EventualOrdered::Incomplete(data) = self {
             Ok(data)
         } else {
             Err(Complete(()))
@@ -56,47 +58,47 @@ impl<T: Futures> EventualUnordered<T> {
 
 #[derive(Debug, Error)]
 #[bounds(where T: Error + 'static)]
-pub enum EventualUnorderedError<T> {
+pub enum EventualOrderedError<T> {
     #[error(transparent)]
     Underlying(T),
-    #[error("attempted to poll EventualUnordered before completion")]
+    #[error("attempted to poll EventualOrdered before completion")]
     Incomplete,
 }
 
-impl<T> EventualUnorderedError<T> {
+impl<T> EventualOrderedError<T> {
     pub fn unwrap_complete(self) -> T {
-        if let EventualUnorderedError::Underlying(item) = self {
+        if let EventualOrderedError::Underlying(item) = self {
             item
         } else {
-            panic!("unwrapped incomplete EventualUnorderedError")
+            panic!("unwrapped incomplete EventualOrderedError")
         }
     }
 }
 
-impl<T: Futures + Unpin, C: ?Sized> Future<C> for EventualUnordered<T>
+impl<T: Futures + Unpin, C: ?Sized> Future<C> for EventualOrdered<T>
 where
-    Unordered<T>: Future<C>,
+    Ordered<T>: Future<C>,
     T::Data: Unpin,
 {
-    type Ok = <Unordered<T> as Future<C>>::Ok;
-    type Error = EventualUnorderedError<<Unordered<T> as Future<C>>::Error>;
+    type Ok = <Ordered<T> as Future<C>>::Ok;
+    type Error = EventualOrderedError<<Ordered<T> as Future<C>>::Error>;
 
     fn poll<R: BorrowMut<C>>(
         mut self: Pin<&mut Self>,
         cx: &mut Context,
         mut ctx: R,
     ) -> Poll<Result<Self::Ok, Self::Error>> {
-        if let EventualUnordered::Complete(future) = &mut *self {
+        if let EventualOrdered::Complete(future) = &mut *self {
             Pin::new(future)
                 .poll(cx, ctx.borrow_mut())
-                .map_err(EventualUnorderedError::Underlying)
+                .map_err(EventualOrderedError::Underlying)
         } else {
-            Poll::Ready(Err(EventualUnorderedError::Incomplete))
+            Poll::Ready(Err(EventualOrderedError::Incomplete))
         }
     }
 }
 
-pub struct Unordered<T: Futures> {
+pub struct Ordered<T: Futures> {
     futures: T::Data,
 }
 
@@ -104,7 +106,7 @@ impl<T> Futures for [T; 0] {
     type Data = ();
 }
 
-impl<C: ?Sized, T: Future<C>> Future<C> for Unordered<[T; 0]> {
+impl<C: ?Sized, T: Future<C>> Future<C> for Ordered<[T; 0]> {
     type Ok = ();
     type Error = T::Error;
 
@@ -117,9 +119,9 @@ impl<C: ?Sized, T: Future<C>> Future<C> for Unordered<[T; 0]> {
     }
 }
 
-impl<T> From<ArrayVec<[T; 0]>> for Unordered<ArrayVec<[T; 0]>> {
+impl<T> From<ArrayVec<[T; 0]>> for Ordered<ArrayVec<[T; 0]>> {
     fn from(_: ArrayVec<[T; 0]>) -> Self {
-        Unordered { futures: () }
+        Ordered { futures: () }
     }
 }
 
@@ -127,7 +129,7 @@ impl<T> Futures for ArrayVec<[T; 0]> {
     type Data = ();
 }
 
-impl<C: ?Sized, T: Future<C>> Future<C> for Unordered<ArrayVec<[T; 0]>> {
+impl<C: ?Sized, T: Future<C>> Future<C> for Ordered<ArrayVec<[T; 0]>> {
     type Ok = ();
     type Error = T::Error;
 
@@ -144,7 +146,7 @@ impl<T> Futures for [T; 1] {
     type Data = T;
 }
 
-impl<C: ?Sized, T: Future<C> + Unpin> Future<C> for Unordered<[T; 1]> {
+impl<C: ?Sized, T: Future<C> + Unpin> Future<C> for Ordered<[T; 1]> {
     type Ok = T::Ok;
     type Error = T::Error;
 
@@ -157,9 +159,9 @@ impl<C: ?Sized, T: Future<C> + Unpin> Future<C> for Unordered<[T; 1]> {
     }
 }
 
-impl<T> From<[T; 1]> for Unordered<[T; 1]> {
+impl<T> From<[T; 1]> for Ordered<[T; 1]> {
     fn from(futures: [T; 1]) -> Self {
-        Unordered {
+        Ordered {
             futures: ArrayVec::from(futures).into_iter().next().unwrap(),
         }
     }
@@ -169,7 +171,7 @@ impl<T> Futures for ArrayVec<[T; 1]> {
     type Data = T;
 }
 
-impl<C: ?Sized, T: Future<C> + Unpin> Future<C> for Unordered<ArrayVec<[T; 1]>> {
+impl<C: ?Sized, T: Future<C> + Unpin> Future<C> for Ordered<ArrayVec<[T; 1]>> {
     type Ok = T::Ok;
     type Error = T::Error;
 
@@ -182,9 +184,9 @@ impl<C: ?Sized, T: Future<C> + Unpin> Future<C> for Unordered<ArrayVec<[T; 1]>> 
     }
 }
 
-impl<T> From<ArrayVec<[T; 1]>> for Unordered<ArrayVec<[T; 1]>> {
+impl<T> From<ArrayVec<[T; 1]>> for Ordered<ArrayVec<[T; 1]>> {
     fn from(futures: ArrayVec<[T; 1]>) -> Self {
-        Unordered {
+        Ordered {
             futures: ArrayVec::from(futures).into_iter().next().unwrap(),
         }
     }
@@ -194,14 +196,14 @@ macro_rules! array_impl {
     ($($len:literal)*) => {
         $(
             impl<T> Futures for [T; $len] {
-                type Data = [Option<T>; $len];
+                type Data = (Rev<IntoIter<[T; $len]>>, Option<T>);
             }
 
             impl<T> Futures for ArrayVec<[T; $len]> {
-                type Data = [Option<T>; $len];
+                type Data = (Rev<IntoIter<[T; $len]>>, Option<T>);
             }
 
-            impl<C: ?Sized, T: Future<C, Ok = ()> + Unpin> Future<C> for Unordered<[T; $len]> {
+            impl<C: ?Sized, T: Future<C, Ok = ()> + Unpin> Future<C> for Ordered<[T; $len]> {
                 type Ok = ();
                 type Error = T::Error;
 
@@ -210,26 +212,24 @@ macro_rules! array_impl {
                     cx: &mut Context,
                     mut ctx: R,
                 ) -> Poll<Result<Self::Ok, Self::Error>> {
-                    let mut some_pending = false;
-
-                    for i in 0..$len {
-                        if let Some(mut future) = self.futures[i].take() {
-                            if let Poll::Pending = Pin::new(&mut future).poll(cx, ctx.borrow_mut())? {
-                                self.futures[i] = Some(future);
-                                some_pending = true;
+                    loop {
+                        if let Some(future) = self.futures.1.as_mut() {
+                            ready!(Pin::new(future).poll(cx, ctx.borrow_mut()))?;
+                            self.futures.1 = self.futures.0.next();
+                            if self.futures.1.is_none() {
+                                return Poll::Ready(Ok(()));
+                            }
+                        } else {
+                            self.futures.1 = self.futures.0.next();
+                            if self.futures.1.is_none() {
+                                return Poll::Ready(Ok(()));
                             }
                         }
-                    }
-
-                    if some_pending {
-                        Poll::Pending
-                    } else {
-                        Poll::Ready(Ok(()))
                     }
                 }
             }
 
-            impl<C: ?Sized, T: Future<C, Ok = ()> + Unpin> Future<C> for Unordered<ArrayVec<[T; $len]>> {
+            impl<C: ?Sized, T: Future<C, Ok = ()> + Unpin> Future<C> for Ordered<ArrayVec<[T; $len]>> {
                 type Ok = ();
                 type Error = T::Error;
 
@@ -238,47 +238,32 @@ macro_rules! array_impl {
                     cx: &mut Context,
                     mut ctx: R,
                 ) -> Poll<Result<Self::Ok, Self::Error>> {
-                    let mut some_pending = false;
-
-                    for i in 0..$len {
-                        if let Some(mut future) = self.futures[i].take() {
-                            if let Poll::Pending = Pin::new(&mut future).poll(cx, ctx.borrow_mut())? {
-                                self.futures[i] = Some(future);
-                                some_pending = true;
+                    loop {
+                        if let Some(future) = self.futures.1.as_mut() {
+                            ready!(Pin::new(future).poll(cx, ctx.borrow_mut()))?;
+                            self.futures.1 = self.futures.0.next();
+                            if self.futures.1.is_none() {
+                                return Poll::Ready(Ok(()));
+                            }
+                        } else {
+                            self.futures.1 = self.futures.0.next();
+                            if self.futures.1.is_none() {
+                                return Poll::Ready(Ok(()));
                             }
                         }
-                    }
-
-                    if some_pending {
-                        Poll::Pending
-                    } else {
-                        Poll::Ready(Ok(()))
                     }
                 }
             }
 
-            impl<T> From<[T; $len]> for Unordered<[T; $len]> {
+            impl<T> From<[T; $len]> for Ordered<[T; $len]> {
                 fn from(futures: [T; $len]) -> Self {
-                    let futures = ArrayVec::from(futures)
-                        .into_iter()
-                        .map(|item| Some(item))
-                        .collect::<ArrayVec<_>>()
-                        .into_inner()
-                        .unwrap_or_else(|_| panic!("invalid array state"));
-
-                    Unordered { futures }
+                    Ordered { futures: (ArrayVec::from(futures).into_iter().rev(), None) }
                 }
             }
 
-            impl<T> From<ArrayVec<[T; $len]>> for Unordered<ArrayVec<[T; $len]>> {
+            impl<T> From<ArrayVec<[T; $len]>> for Ordered<ArrayVec<[T; $len]>> {
                 fn from(futures: ArrayVec<[T; $len]>) -> Self {
-                    let futures = futures
-                        .into_iter()
-                        .map(|item| Some(item))
-                        .collect::<ArrayVec<_>>()
-                        .into_inner()
-                        .unwrap_or_else(|_| panic!("invalid array state"));
-                    Unordered { futures }
+                    Ordered { futures: (futures.into_iter().rev(), None) }
                 }
             }
         )*
@@ -331,7 +316,7 @@ impl<T> Futures for (T,) {
     type Data = T;
 }
 
-impl<C: ?Sized, T: Future<C> + Unpin> Future<C> for Unordered<(T,)> {
+impl<C: ?Sized, T: Future<C> + Unpin> Future<C> for Ordered<(T,)> {
     type Ok = T::Ok;
     type Error = T::Error;
 
@@ -344,10 +329,15 @@ impl<C: ?Sized, T: Future<C> + Unpin> Future<C> for Unordered<(T,)> {
     }
 }
 
-impl<T> From<(T,)> for Unordered<(T,)> {
+impl<T> From<(T,)> for Ordered<(T,)> {
     fn from(futures: (T,)) -> Self {
-        Unordered { futures: futures.0 }
+        Ordered { futures: futures.0 }
     }
+}
+
+pub struct TupleOrderedInner<T> {
+    data: T,
+    index: u8,
 }
 
 macro_rules! tuple_impls {
@@ -361,17 +351,17 @@ macro_rules! tuple_impls {
             )]
             pub enum $error<$($name,)+> {
                 $(
-                    #[error("error in Unordered for tuple variant")]
+                    #[error("error in Ordered for tuple variant")]
                     $name(#[source] $name),
                 )+
             }
 
             impl<$($name,)+> Futures for ($(Option<$name>,)+) {
-                type Data = ($(Option<$name>,)+);
+                type Data = TupleOrderedInner<($(Option<$name>,)+)>;
             }
 
             impl<C: ?Sized, $($name: Future<C, Ok = ()> + Unpin,)+> Future<C>
-                for Unordered<($(Option<$name>,)+)>
+                for Ordered<($(Option<$name>,)+)>
             {
                 type Ok = ();
                 type Error = $error<$($name::Error,)+>;
@@ -381,40 +371,34 @@ macro_rules! tuple_impls {
                     cx: &mut Context,
                     mut ctx: R,
                 ) -> Poll<Result<Self::Ok, Self::Error>> {
-                    let mut some_pending = false;
-
-                    $(
-                        if let Some(mut future) = self.futures.$n.take() {
-                            if let Poll::Pending = Pin::new(&mut future)
-                                .poll(cx, ctx.borrow_mut())
-                                .map_err($error::$name)?
-                            {
-                                self.futures.$n = Some(future);
-                                some_pending = true;
-                            }
+                    loop {
+                        match self.futures.index {
+                            $($n => {
+                                if let Some(future) = self.futures.data.$n.as_mut() {
+                                    ready!(Pin::new(future).poll(cx, ctx.borrow_mut())).map_err($error::$name)?;
+                                    self.futures.index += 1;
+                                } else {
+                                    self.futures.index += 1;
+                                }
+                            })*
+                            _ => { return Poll::Ready(Ok(())); }
                         }
-                    )+
-
-                    if some_pending {
-                        Poll::Pending
-                    } else {
-                        Poll::Ready(Ok(()))
                     }
                 }
             }
 
-            impl<$($name,)+> From<($($name,)+)> for Unordered<($(Option<$name>,)+)> {
+            impl<$($name,)+> From<($($name,)+)> for Ordered<($(Option<$name>,)+)> {
                 fn from(futures: ($($name,)+)) -> Self {
-                    Unordered {
-                        futures: ($(Some(futures.$n)),+)
+                    Ordered {
+                        futures: TupleOrderedInner { data: ($(Some(futures.$n)),+), index: 0 }
                     }
                 }
             }
 
-            impl<$($name,)+> From<($(Option<$name>,)+)> for Unordered<($(Option<$name>,)+)> {
+            impl<$($name,)+> From<($(Option<$name>,)+)> for Ordered<($(Option<$name>,)+)> {
                 fn from(futures: ($(Option<$name>,)+)) -> Self {
-                    Unordered {
-                        futures,
+                    Ordered {
+                        futures: TupleOrderedInner { data: futures, index: 0 }
                     }
                 }
             }
@@ -453,7 +437,7 @@ mod allocated {
         type Data = Vec<T>;
     }
 
-    impl<C: ?Sized, T: Future<C, Ok = ()> + Unpin> Future<C> for Unordered<Vec<T>> {
+    impl<C: ?Sized, T: Future<C, Ok = ()> + Unpin> Future<C> for Ordered<Vec<T>> {
         type Ok = ();
         type Error = T::Error;
 
@@ -481,9 +465,9 @@ mod allocated {
         }
     }
 
-    impl<T> From<Vec<T>> for Unordered<Vec<T>> {
+    impl<T> From<Vec<T>> for Ordered<Vec<T>> {
         fn from(futures: Vec<T>) -> Self {
-            Unordered { futures }
+            Ordered { futures }
         }
     }
 }

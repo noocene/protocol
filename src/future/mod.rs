@@ -6,8 +6,8 @@ use core::{
 
 mod ready;
 pub use ready::{ready, Ready};
-pub mod unordered;
-pub use unordered::Unordered;
+pub mod ordered;
+pub use ordered::Ordered;
 
 pub trait Future<C: ?Sized> {
     type Ok;
