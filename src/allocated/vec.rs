@@ -11,26 +11,28 @@ use core::{
     pin::Pin,
     task::{Context, Poll},
 };
+use core_error::Error;
+use thiserror::Error;
 
-enum IteratorUnravelState {
+enum VecUnravelState {
     Writing,
     Flushing,
     Targets,
     Done,
 }
 
-pub struct IteratorUnravel<
+pub struct VecUnravel<
     T: IntoIterator,
     C: ?Sized + Write<Vec<<C as Dispatch<T::Item>>::Handle>> + Fork<T::Item>,
 > {
     fork: Option<C::Future>,
     handles: Vec<C::Handle>,
     targets: EventualUnordered<Vec<C::Target>>,
-    state: IteratorUnravelState,
+    state: VecUnravelState,
     data: T::IntoIter,
 }
 
-pub struct IteratorCoalesce<
+pub struct VecCoalesce<
     T,
     U: FromIterator<T>,
     C: ?Sized + Read<Vec<<C as Dispatch<T>>::Handle>> + Join<T> + Unpin,
@@ -41,23 +43,39 @@ pub struct IteratorCoalesce<
     ty: PhantomData<U>,
 }
 
-#[derive(Debug)]
-pub enum IteratorUnravelError<T, U, V> {
-    Transport(T),
-    Dispatch(U),
-    Target(V),
+#[derive(Debug, Error)]
+#[bounds(
+    where
+        T: Error + 'static,
+        U: Error + 'static,
+        V: Error + 'static
+)]
+pub enum VecUnravelError<T, U, V> {
+    #[error("failed to write handle for Vec: {0}")]
+    Transport(#[source] T),
+    #[error("failed to fork item in Vec: {0}")]
+    Dispatch(#[source] U),
+    #[error("failed to finalize item in Vec: {0}")]
+    Target(#[source] V),
 }
 
-#[derive(Debug)]
-pub enum IteratorCoalesceError<T, U> {
-    Transport(T),
-    Dispatch(U),
+#[derive(Debug, Error)]
+#[bounds(
+    where
+        T: Error + 'static,
+        U: Error + 'static,
+)]
+pub enum VecCoalesceError<T, U> {
+    #[error("failed to read handle for Vec: {0}")]
+    Transport(#[source] T),
+    #[error("failed to join item in Vec: {0}")]
+    Dispatch(#[source] U),
 }
 
 impl<
         T: IntoIterator,
         C: ?Sized + Write<Vec<<C as Dispatch<T::Item>>::Handle>> + Fork<T::Item> + Unpin,
-    > Future<C> for IteratorUnravel<T, C>
+    > Future<C> for VecUnravel<T, C>
 where
     T::IntoIter: Unpin,
     C::Handle: Unpin,
@@ -65,11 +83,8 @@ where
     C::Future: Unpin,
 {
     type Ok = ();
-    type Error = IteratorUnravelError<
-        C::Error,
-        <C::Future as Future<C>>::Error,
-        <C::Target as Future<C>>::Error,
-    >;
+    type Error =
+        VecUnravelError<C::Error, <C::Future as Future<C>>::Error, <C::Target as Future<C>>::Error>;
 
     fn poll<R: BorrowMut<C>>(
         mut self: Pin<&mut Self>,
@@ -83,7 +98,7 @@ where
         loop {
             if let Some(future) = this.fork.as_mut() {
                 let (target, handle) = ready!(Pin::new(future).poll(cx, &mut *ctx))
-                    .map_err(IteratorUnravelError::Dispatch)?;
+                    .map_err(VecUnravelError::Dispatch)?;
                 this.handles.push(handle);
                 this.targets.data().unwrap().push(target);
                 this.fork.take();
@@ -92,28 +107,26 @@ where
             } else {
                 let mut ct = Pin::new(&mut *ctx);
                 match this.state {
-                    IteratorUnravelState::Writing => {
-                        ready!(ct.as_mut().poll_ready(cx))
-                            .map_err(IteratorUnravelError::Transport)?;
+                    VecUnravelState::Writing => {
+                        ready!(ct.as_mut().poll_ready(cx)).map_err(VecUnravelError::Transport)?;
                         ct.write(replace(&mut this.handles, Vec::new()))
-                            .map_err(IteratorUnravelError::Transport)?;
-                        this.state = IteratorUnravelState::Flushing;
+                            .map_err(VecUnravelError::Transport)?;
+                        this.state = VecUnravelState::Flushing;
                     }
-                    IteratorUnravelState::Flushing => {
-                        ready!(ct.as_mut().poll_flush(cx))
-                            .map_err(IteratorUnravelError::Transport)?;
+                    VecUnravelState::Flushing => {
+                        ready!(ct.as_mut().poll_flush(cx)).map_err(VecUnravelError::Transport)?;
                         this.targets.complete();
-                        this.state = IteratorUnravelState::Targets;
+                        this.state = VecUnravelState::Targets;
                     }
-                    IteratorUnravelState::Targets => {
+                    VecUnravelState::Targets => {
                         ready!(Pin::new(&mut this.targets)
                             .poll(cx, &mut *ctx)
                             .map_err(EventualUnorderedError::unwrap_complete)
-                            .map_err(IteratorUnravelError::Target))?;
-                        this.state = IteratorUnravelState::Done;
+                            .map_err(VecUnravelError::Target))?;
+                        this.state = VecUnravelState::Done;
                         return Poll::Ready(Ok(()));
                     }
-                    IteratorUnravelState::Done => panic!("IteratorUnravel polled after completion"),
+                    VecUnravelState::Done => panic!("VecUnravel polled after completion"),
                 }
             }
         }
@@ -124,7 +137,7 @@ impl<
         T,
         U: FromIterator<T>,
         C: ?Sized + Read<Vec<<C as Dispatch<T>>::Handle>> + Join<T> + Unpin,
-    > Future<C> for IteratorCoalesce<T, U, C>
+    > Future<C> for VecCoalesce<T, U, C>
 where
     C::Future: Unpin,
     C::Handle: Unpin,
@@ -132,7 +145,7 @@ where
     T: Unpin,
 {
     type Ok = U;
-    type Error = IteratorCoalesceError<C::Error, <C::Future as Future<C>>::Error>;
+    type Error = VecCoalesceError<C::Error, <C::Future as Future<C>>::Error>;
 
     fn poll<R: BorrowMut<C>>(
         mut self: Pin<&mut Self>,
@@ -150,7 +163,7 @@ where
             if let Some(handles) = &mut this.handles {
                 if let Some(future) = this.join.as_mut() {
                     let handle = ready!(Pin::new(future).poll(cx, &mut *ctx))
-                        .map_err(IteratorCoalesceError::Dispatch)?;
+                        .map_err(VecCoalesceError::Dispatch)?;
                     this.data.push(handle);
                     this.join.take();
                 } else if let Some(handle) = handles.next() {
@@ -163,7 +176,7 @@ where
             } else {
                 this.handles = Some(
                     ready!(Pin::new(&mut *ctx).read(cx))
-                        .map_err(IteratorCoalesceError::Transport)?
+                        .map_err(VecCoalesceError::Transport)?
                         .into_iter(),
                 );
             }
@@ -178,17 +191,17 @@ where
     C::Future: Unpin,
     C::Target: Unpin,
 {
-    type Future = IteratorUnravel<Rev<IntoIter<T>>, C>;
+    type Future = VecUnravel<Rev<IntoIter<T>>, C>;
 
     fn unravel(self) -> Self::Future {
         let data = self.into_iter().rev();
 
-        IteratorUnravel {
+        VecUnravel {
             fork: None,
             handles: Vec::with_capacity(data.size_hint().0),
             targets: EventualUnordered::new(Vec::with_capacity(data.size_hint().0)),
             data,
-            state: IteratorUnravelState::Writing,
+            state: VecUnravelState::Writing,
         }
     }
 }
@@ -199,10 +212,10 @@ where
     C::Handle: Unpin,
     C::Future: Unpin,
 {
-    type Future = IteratorCoalesce<T, Vec<T>, C>;
+    type Future = VecCoalesce<T, Vec<T>, C>;
 
     fn coalesce() -> Self::Future {
-        IteratorCoalesce {
+        VecCoalesce {
             data: Vec::new(),
             handles: None,
             join: None,

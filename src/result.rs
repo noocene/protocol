@@ -5,6 +5,8 @@ use core::{
     pin::Pin,
     task::{Context, Poll},
 };
+use core_error::Error;
+use thiserror::Error;
 
 pub enum ResultUnravel<
     T: Unpin,
@@ -61,20 +63,42 @@ impl<
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[bounds(
+    where
+        T: Error + 'static,
+        E: Error + 'static,
+        U: Error + 'static
+)]
 pub enum ResultCoalesceError<T, E, U> {
-    DispatchOk(T),
-    DispatchErr(E),
-    Transport(U),
+    #[error("failed to join Ok variant of Result: {0}")]
+    DispatchOk(#[source] T),
+    #[error("failed to join Err variant of Result: {0}")]
+    DispatchErr(#[source] E),
+    #[error("failed to read handle for Result: {0}")]
+    Transport(#[source] U),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[bounds(
+    where
+        T: Error + 'static,
+        E: Error + 'static,
+        U: Error + 'static,
+        V: Error + 'static,
+        W: Error + 'static
+)]
 pub enum ResultUnravelError<T, E, U, V, W> {
-    DispatchOk(T),
-    DispatchErr(E),
-    TargetOk(V),
-    TargetErr(W),
-    Transport(U),
+    #[error("failed to fork Ok variant of Result: {0}")]
+    DispatchOk(#[source] T),
+    #[error("failed to fork Err variant of Result: {0}")]
+    DispatchErr(#[source] E),
+    #[error("failed to finalize Ok variant of Result: {0}")]
+    TargetOk(#[source] V),
+    #[error("failed to finalize Err variant of Result: {0}")]
+    TargetErr(#[source] W),
+    #[error("failed to write handle for Result: {0}")]
+    Transport(#[source] U),
 }
 
 impl<

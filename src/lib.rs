@@ -18,7 +18,7 @@ mod result;
 mod tuples;
 
 #[cfg(feature = "alloc")]
-mod allocated;
+pub mod allocated;
 
 pub trait Unravel<C: ?Sized> {
     type Future: Future<C, Ok = ()>;

@@ -11,6 +11,8 @@ use core::{
     pin::Pin,
     task::{Context, Poll},
 };
+use core_error::Error;
+use thiserror::Error;
 
 macro_rules! tuple_impls {
     ($($coalesce:ident $cstate:ident $unravel:ident $ustate:ident $u_error:ident $c_error:ident => ($first_n:tt ($first:ident $second:ident) $($n:tt ($ty:ident $next:ident $next_n:tt))+) $last_n:tt $last:ident )+) => {
@@ -34,21 +36,49 @@ macro_rules! tuple_impls {
                 Done,
             }
 
-            #[derive(Debug)]
+            #[derive(Debug, Error)]
+            #[bounds(
+                where
+                    E: Error + 'static,
+                    $first: Error + 'static,
+                    $($ty: Error + 'static,)+
+                    $last: Error + 'static,
+                    T: Error + 'static,
+            )]
             pub enum $u_error<E, $first, $($ty,)+ $last, T> {
-                Transport(E),
-                $first($first),
-                $last($last),
-                $($ty($ty),)+
-                Target(T)
+                #[error("failed to write handle for tuple")]
+                Transport(#[source] E),
+                #[error("failed to fork element in tuple")]
+                $first(#[source] $first),
+                #[error("failed to fork element in tuple")]
+                $last(#[source] $last),
+                $(
+                    #[error("failed to fork element in tuple")]
+                    $ty(#[source] $ty),
+                )+
+                #[error("failed to finalize element in tuple")]
+                Target(#[source] T)
             }
 
-            #[derive(Debug)]
+            #[derive(Debug, Error)]
+            #[bounds(
+                where
+                    E: Error + 'static,
+                    $first: Error + 'static,
+                    $($ty: Error + 'static,)+
+                    $last: Error + 'static,
+            )]
             pub enum $c_error<E, $first, $($ty,)+ $last> {
-                Transport(E),
-                $first($first),
-                $last($last),
-                $($ty($ty),)+
+                #[error("failed to read handle for tuple")]
+                Transport(#[source] E),
+                #[error("failed to join element in tuple")]
+                $first(#[source] $first),
+                #[error("failed to join element in tuple")]
+                $last(#[source] $last),
+                $(
+                    #[error("failed to join element in tuple")]
+                    $ty(#[source] $ty),
+                )+
             }
 
             pub struct $unravel<
@@ -367,19 +397,39 @@ enum Tuple2CoalesceState<T, U> {
     Done,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[bounds(
+    where
+        T: Error + 'static,
+        U: Error + 'static,
+        V: Error + 'static,
+        W: Error + 'static,
+)]
 pub enum Tuple2UnravelError<T, U, V, W> {
-    Transport(T),
-    DispatchT(U),
-    DispatchU(V),
-    Target(W),
+    #[error("failed to write handle for tuple: {0}")]
+    Transport(#[source] T),
+    #[error("failed to fork element in tuple: {0}")]
+    DispatchT(#[source] U),
+    #[error("failed to fork element in tuple: {0}")]
+    DispatchU(#[source] V),
+    #[error("failed to finalize element in tuple: {0}")]
+    Target(#[source] W),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[bounds(
+    where
+        T: Error + 'static,
+        U: Error + 'static,
+        V: Error + 'static,
+)]
 pub enum Tuple2CoalesceError<T, U, V> {
-    Transport(T),
-    DispatchT(U),
-    DispatchU(V),
+    #[error("failed to read handle for tuple: {0}")]
+    Transport(#[source] T),
+    #[error("failed to join element in tuple: {0}")]
+    DispatchT(#[source] U),
+    #[error("failed to join element in tuple: {0}")]
+    DispatchU(#[source] V),
 }
 
 pub struct Tuple2Unravel<
@@ -657,17 +707,33 @@ pub enum Tuple1Coalesce<T: Unpin, C: ?Sized + Read<<C as Dispatch<T>>::Handle> +
     Done,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[bounds(
+    where
+        T: Error + 'static,
+        U: Error + 'static,
+        V: Error + 'static,
+)]
 pub enum Tuple1UnravelError<T, U, V> {
-    Transport(T),
-    Dispatch(U),
-    Target(V),
+    #[error("failed to write handle for tuple: {0}")]
+    Transport(#[source] T),
+    #[error("failed to fork element in tuple: {0}")]
+    Dispatch(#[source] U),
+    #[error("failed to finalize element in tuple: {0}")]
+    Target(#[source] V),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[bounds(
+    where
+        T: Error + 'static,
+        U: Error + 'static,
+)]
 pub enum Tuple1CoalesceError<T, U> {
-    Transport(T),
-    Dispatch(U),
+    #[error("failed to read handle for tuple: {0}")]
+    Transport(#[source] T),
+    #[error("failed to join element in tuple: {0}")]
+    Dispatch(#[source] U),
 }
 
 impl<T: Unpin, C: ?Sized + Write<<C as Dispatch<T>>::Handle> + Fork<T> + Unpin> Future<C>

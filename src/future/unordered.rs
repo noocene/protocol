@@ -6,6 +6,8 @@ use core::{
     pin::Pin,
     task::{Context, Poll},
 };
+use core_error::Error;
+use thiserror::Error;
 
 pub trait Futures {
     type Data;
@@ -17,8 +19,9 @@ pub enum EventualUnordered<T: Futures> {
     Complete(Unordered<T>),
 }
 
-#[derive(Debug)]
-pub struct Complete;
+#[derive(Debug, Error)]
+#[error("attempted to read data from EventualUnordered after completion")]
+pub struct Complete(());
 
 impl<T: Futures> EventualUnordered<T> {
     pub fn new(input: T) -> Self {
@@ -46,14 +49,17 @@ impl<T: Futures> EventualUnordered<T> {
         if let EventualUnordered::Incomplete(data) = self {
             Ok(data)
         } else {
-            Err(Complete)
+            Err(Complete(()))
         }
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[bounds(where T: Error + 'static)]
 pub enum EventualUnorderedError<T> {
+    #[error(transparent)]
     Underlying(T),
+    #[error("attempted to poll EventualUnordered before completion")]
     Incomplete,
 }
 

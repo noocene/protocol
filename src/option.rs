@@ -5,6 +5,8 @@ use core::{
     pin::Pin,
     task::{Context, Poll},
 };
+use core_error::Error;
+use thiserror::Error;
 
 pub enum OptionUnravel<
     T: Unpin,
@@ -40,17 +42,33 @@ impl<T: Unpin, C: ?Sized + Write<Option<<C as Dispatch<T>>::Handle>> + Fork<T> +
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[bounds(
+    where
+        T: Error + 'static,
+        U: Error + 'static,
+        V: Error + 'static
+)]
 pub enum OptionUnravelError<T, U, V> {
-    Transport(T),
-    Dispatch(U),
-    Target(V),
+    #[error("failed to write handle for Option: {0}")]
+    Transport(#[source] T),
+    #[error("failed to fork Some variant of Option: {0}")]
+    Dispatch(#[source] U),
+    #[error("failed to finalize Some variant of Option: {0}")]
+    Target(#[source] V),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[bounds(
+    where
+        T: Error + 'static,
+        U: Error + 'static,
+)]
 pub enum OptionCoalesceError<T, U> {
-    Transport(T),
-    Dispatch(U),
+    #[error("failed to read handle for Option: {0}")]
+    Transport(#[source] T),
+    #[error("failed to join Some variant of Option: {0}")]
+    Dispatch(#[source] U),
 }
 
 impl<T: Unpin, C: ?Sized + Write<Option<<C as Dispatch<T>>::Handle>> + Fork<T> + Unpin> Future<C>
