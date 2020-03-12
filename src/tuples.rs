@@ -1,13 +1,21 @@
-use crate::{ready, Coalesce, Dispatch, Fork, Future, Join, Read, Unravel, Write};
+use crate::{
+    future::{
+        ordered::{EventualOrdered, EventualOrderedError},
+        Ordered,
+    },
+    ready, Coalesce, Dispatch, Fork, Future, Join, Read, Unravel, Write,
+};
 use core::{
     borrow::BorrowMut,
     mem::replace,
     pin::Pin,
     task::{Context, Poll},
 };
+use core_error::Error;
+use thiserror::Error;
 
 macro_rules! tuple_impls {
-    ($($coalesce:ident $cstate:ident $unravel:ident $ustate:ident $u_error:ident $c_error:ident $target_error:ident => ($first_n:tt ($first:ident $second:ident) $($n:tt ($ty:ident $next:ident $next_n:tt))+) $last_n:tt $last:ident )+) => {
+    ($($coalesce:ident $cstate:ident $unravel:ident $ustate:ident $u_error:ident $c_error:ident => ($first_n:tt ($first:ident $second:ident) $($n:tt ($ty:ident $next:ident $next_n:tt))+) $last_n:tt $last:ident )+) => {
         $(
             pub enum $ustate<$first, $($ty,)+ $last> {
                 None,
@@ -16,7 +24,7 @@ macro_rules! tuple_impls {
                 $($ty($ty),)+
                 Writing,
                 Flushing,
-                Target(usize),
+                Target,
                 Done
             }
 
@@ -28,28 +36,49 @@ macro_rules! tuple_impls {
                 Done,
             }
 
-            #[derive(Debug)]
+            #[derive(Debug, Error)]
+            #[bounds(
+                where
+                    E: Error + 'static,
+                    $first: Error + 'static,
+                    $($ty: Error + 'static,)+
+                    $last: Error + 'static,
+                    T: Error + 'static,
+            )]
             pub enum $u_error<E, $first, $($ty,)+ $last, T> {
-                Transport(E),
-                $first($first),
-                $last($last),
-                $($ty($ty),)+
-                Target(T)
+                #[error("failed to write handle for tuple")]
+                Transport(#[source] E),
+                #[error("failed to fork element in tuple")]
+                $first(#[source] $first),
+                #[error("failed to fork element in tuple")]
+                $last(#[source] $last),
+                $(
+                    #[error("failed to fork element in tuple")]
+                    $ty(#[source] $ty),
+                )+
+                #[error("failed to finalize element in tuple")]
+                Target(#[source] T)
             }
 
-            #[derive(Debug)]
+            #[derive(Debug, Error)]
+            #[bounds(
+                where
+                    E: Error + 'static,
+                    $first: Error + 'static,
+                    $($ty: Error + 'static,)+
+                    $last: Error + 'static,
+            )]
             pub enum $c_error<E, $first, $($ty,)+ $last> {
-                Transport(E),
-                $first($first),
-                $last($last),
-                $($ty($ty),)+
-            }
-
-            #[derive(Debug)]
-            pub enum $target_error<$first, $($ty,)+ $last> {
-                $first($first),
-                $last($last),
-                $($ty($ty),)+
+                #[error("failed to read handle for tuple")]
+                Transport(#[source] E),
+                #[error("failed to join element in tuple")]
+                $first(#[source] $first),
+                #[error("failed to join element in tuple")]
+                $last(#[source] $last),
+                $(
+                    #[error("failed to join element in tuple")]
+                    $ty(#[source] $ty),
+                )+
             }
 
             pub struct $unravel<
@@ -68,11 +97,11 @@ macro_rules! tuple_impls {
                     $(Option<<C as Dispatch<$ty>>::Handle>,)+
                     Option<<C as Dispatch<$last>>::Handle>,
                 ),
-                targets: (
+                targets: EventualOrdered<(
                     Option<<C as Fork<$first>>::Target>,
                     $(Option<<C as Fork<$ty>>::Target>,)+
                     Option<<C as Fork<$last>>::Target>,
-                ),
+                )>,
                 data: (Option<$first>, $(Option<$ty>,)+ Option<$last>),
                 state: $ustate<<C as Fork<$first>>::Future, $(<C as Fork<$ty>>::Future,)+ <C as Fork<$last>>::Future>
             }
@@ -123,9 +152,9 @@ macro_rules! tuple_impls {
                     <<C as Fork<$first>>::Future as Future<C>>::Error,
                     $(<<C as Fork<$ty>>::Future as Future<C>>::Error,)+
                     <<C as Fork<$last>>::Future as Future<C>>::Error,
-                    $target_error<<<C as Fork<$first>>::Target as Future<C>>::Error,
-                    $(<<C as Fork<$ty>>::Target as Future<C>>::Error,)+
-                    <<C as Fork<$last>>::Target as Future<C>>::Error,>
+                    <Ordered<(Option<<C as Fork<$first>>::Target>,
+                    $(Option<<C as Fork<$ty>>::Target>,)+
+                    Option<<C as Fork<$last>>::Target>)> as Future<C>>::Error
                 >;
 
                 fn poll<R: BorrowMut<C>>(
@@ -151,14 +180,14 @@ macro_rules! tuple_impls {
                                 let (target, handle) = ready!(Pin::new(future).poll(cx, &mut *ctx))
                                     .map_err($u_error::$first)?;
                                 this.handles.0 = Some(handle);
-                                this.targets.0 = Some(target);
+                                this.targets.data().unwrap().0 = Some(target);
                                 replace(&mut this.state, $ustate::$second(ctx.fork(this.data.1.take().expect("data incomplete"))));
                             }
                             $($ustate::$ty(future) => {
                                 let (target, handle) = ready!(Pin::new(future).poll(cx, &mut *ctx))
                                     .map_err($u_error::$ty)?;
                                 this.handles.$n = Some(handle);
-                                this.targets.$n = Some(target);
+                                this.targets.data().unwrap().$n = Some(target);
 
                                 replace(&mut this.state, $ustate::$next(ctx.fork(this.data.$next_n.take().expect("data incomplete"))));
                             })+
@@ -166,7 +195,7 @@ macro_rules! tuple_impls {
                                 let (target, handle) = ready!(Pin::new(future).poll(cx, &mut *ctx))
                                     .map_err($u_error::$last)?;
                                 this.handles.$last_n = Some(handle);
-                                this.targets.$last_n = Some(target);
+                                this.targets.data().unwrap().$last_n = Some(target);
 
                                 replace(&mut this.state, $ustate::Writing);
                             }
@@ -184,39 +213,15 @@ macro_rules! tuple_impls {
                             $ustate::Flushing => {
                                 let mut ct = Pin::new(&mut *ctx);
                                 ready!(ct.as_mut().poll_flush(cx)).map_err($u_error::Transport)?;
-                                replace(&mut this.state, $ustate::Target(0));
+                                this.targets.complete();
+                                replace(&mut this.state, $ustate::Target);
                             }
-                            $ustate::Target(idx) => {
-                                match idx {
-                                    0 => {
-                                        ready!(
-                                            Pin::new(this.targets.0.as_mut().expect("targets incomplete"))
-                                                .poll(cx, &mut *ctx)
-                                        )
-                                        .map_err(|e| $u_error::Target($target_error::$first(e)))?;
-                                        *idx += 1;
-                                    }
-                                    $($n => {
-                                        ready!(
-                                            Pin::new(this.targets.$n.as_mut().expect("targets incomplete"))
-                                                .poll(cx, &mut *ctx)
-                                        )
-                                        .map_err(|e| $u_error::Target($target_error::$ty(e)))?;
-                                        *idx += 1;
-                                    })+
-                                    $last_n => {
-                                        ready!(
-                                            Pin::new(this.targets.$last_n.as_mut().expect("targets incomplete"))
-                                                .poll(cx, &mut *ctx)
-                                        )
-                                        .map_err(|e| $u_error::Target($target_error::$last(e)))?;
-                                        *idx += 1;
-                                    }
-                                    _ => {
-                                        replace(&mut this.state, $ustate::Done);
-                                        return Poll::Ready(Ok(()));
-                                    }
-                                };
+                            $ustate::Target => {
+                                ready!(Pin::new(&mut this.targets).poll(cx, &mut *ctx))
+                                    .map_err(EventualOrderedError::unwrap_complete)
+                                    .map_err($u_error::Target)?;
+                                replace(&mut this.state, $ustate::Done);
+                                return Poll::Ready(Ok(()));
                             }
                             $ustate::Done => panic!("Tuple unravel polled after completion"),
                         }
@@ -339,7 +344,7 @@ macro_rules! tuple_impls {
                         data: (Some(self.0), $(Some(self.$n),)+ Some(self.$last_n)),
                         state: $ustate::None,
                         handles: (None::<<C as Dispatch<$first>>::Handle>, $(None::<<C as Dispatch<$ty>>::Handle>,)+ None::<<C as Dispatch<$last>>::Handle>),
-                        targets: (None::<<C as Fork<$first>>::Target>, $(None::<<C as Fork<$ty>>::Target>,)+ None::<<C as Fork<$last>>::Target>),
+                        targets: EventualOrdered::new((None::<<C as Fork<$first>>::Target>, $(None::<<C as Fork<$ty>>::Target>,)+ None::<<C as Fork<$last>>::Target>)),
                     }
                 }
             }
@@ -381,7 +386,7 @@ enum Tuple2UnravelState<T, U> {
     U(U),
     Writing,
     Flushing,
-    Target(usize),
+    Target,
     Done,
 }
 
@@ -392,20 +397,39 @@ enum Tuple2CoalesceState<T, U> {
     Done,
 }
 
-#[derive(Debug)]
-pub enum Tuple2UnravelError<T, U, V, W, X> {
-    Transport(T),
-    DispatchT(U),
-    DispatchU(V),
-    TargetT(W),
-    TargetU(X),
+#[derive(Debug, Error)]
+#[bounds(
+    where
+        T: Error + 'static,
+        U: Error + 'static,
+        V: Error + 'static,
+        W: Error + 'static,
+)]
+pub enum Tuple2UnravelError<T, U, V, W> {
+    #[error("failed to write handle for tuple: {0}")]
+    Transport(#[source] T),
+    #[error("failed to fork element in tuple: {0}")]
+    DispatchT(#[source] U),
+    #[error("failed to fork element in tuple: {0}")]
+    DispatchU(#[source] V),
+    #[error("failed to finalize element in tuple: {0}")]
+    Target(#[source] W),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[bounds(
+    where
+        T: Error + 'static,
+        U: Error + 'static,
+        V: Error + 'static,
+)]
 pub enum Tuple2CoalesceError<T, U, V> {
-    Transport(T),
-    DispatchT(U),
-    DispatchU(V),
+    #[error("failed to read handle for tuple: {0}")]
+    Transport(#[source] T),
+    #[error("failed to join element in tuple: {0}")]
+    DispatchT(#[source] U),
+    #[error("failed to join element in tuple: {0}")]
+    DispatchU(#[source] V),
 }
 
 pub struct Tuple2Unravel<
@@ -421,10 +445,10 @@ pub struct Tuple2Unravel<
         Option<<C as Dispatch<T>>::Handle>,
         Option<<C as Dispatch<U>>::Handle>,
     ),
-    targets: (
+    targets: EventualOrdered<(
         Option<<C as Fork<T>>::Target>,
         Option<<C as Fork<U>>::Target>,
-    ),
+    )>,
     data: (Option<T>, Option<U>),
     state: Tuple2UnravelState<<C as Fork<T>>::Future, <C as Fork<U>>::Future>,
 }
@@ -468,8 +492,10 @@ where
         <C as Write<(<C as Dispatch<T>>::Handle, <C as Dispatch<U>>::Handle)>>::Error,
         <<C as Fork<T>>::Future as Future<C>>::Error,
         <<C as Fork<U>>::Future as Future<C>>::Error,
-        <<C as Fork<T>>::Target as Future<C>>::Error,
-        <<C as Fork<U>>::Target as Future<C>>::Error,
+        <Ordered<(
+            Option<<C as Fork<T>>::Target>,
+            Option<<C as Fork<U>>::Target>,
+        )> as Future<C>>::Error,
     >;
 
     fn poll<R: BorrowMut<C>>(
@@ -495,7 +521,7 @@ where
                     let (target, handle) = ready!(Pin::new(future).poll(cx, &mut *ctx))
                         .map_err(Tuple2UnravelError::DispatchT)?;
                     this.handles.0 = Some(handle);
-                    this.targets.0 = Some(target);
+                    this.targets.data().unwrap().0 = Some(target);
                     replace(
                         &mut this.state,
                         Tuple2UnravelState::U(
@@ -507,7 +533,7 @@ where
                     let (target, handle) = ready!(Pin::new(future).poll(cx, &mut *ctx))
                         .map_err(Tuple2UnravelError::DispatchU)?;
                     this.handles.1 = Some(handle);
-                    this.targets.1 = Some(target);
+                    this.targets.data().unwrap().1 = Some(target);
                     replace(&mut this.state, Tuple2UnravelState::Writing);
                 }
                 Tuple2UnravelState::Writing => {
@@ -523,31 +549,15 @@ where
                 Tuple2UnravelState::Flushing => {
                     let mut ct = Pin::new(&mut *ctx);
                     ready!(ct.as_mut().poll_flush(cx)).map_err(Tuple2UnravelError::Transport)?;
-                    replace(&mut this.state, Tuple2UnravelState::Target(0));
+                    this.targets.complete();
+                    replace(&mut this.state, Tuple2UnravelState::Target);
                 }
-                Tuple2UnravelState::Target(idx) => {
-                    match idx {
-                        0 => {
-                            ready!(
-                                Pin::new(this.targets.0.as_mut().expect("targets incomplete"))
-                                    .poll(cx, &mut *ctx)
-                            )
-                            .map_err(Tuple2UnravelError::TargetT)?;
-                            *idx += 1;
-                        }
-                        1 => {
-                            ready!(
-                                Pin::new(this.targets.0.as_mut().expect("targets incomplete"))
-                                    .poll(cx, &mut *ctx)
-                            )
-                            .map_err(Tuple2UnravelError::TargetT)?;
-                            *idx += 1;
-                        }
-                        _ => {
-                            replace(&mut this.state, Tuple2UnravelState::Done);
-                            return Poll::Ready(Ok(()));
-                        }
-                    };
+                Tuple2UnravelState::Target => {
+                    ready!(Pin::new(&mut this.targets).poll(cx, &mut *ctx))
+                        .map_err(EventualOrderedError::unwrap_complete)
+                        .map_err(Tuple2UnravelError::Target)?;
+                    replace(&mut this.state, Tuple2UnravelState::Done);
+                    return Poll::Ready(Ok(()));
                 }
                 Tuple2UnravelState::Done => panic!("Tuple unravel polled after completion"),
             }
@@ -650,7 +660,7 @@ where
         Tuple2Unravel {
             data: (Some(self.0), Some(self.1)),
             handles: (None, None),
-            targets: (None, None),
+            targets: EventualOrdered::new((None, None)),
             state: Tuple2UnravelState::None,
         }
     }
@@ -697,17 +707,33 @@ pub enum Tuple1Coalesce<T: Unpin, C: ?Sized + Read<<C as Dispatch<T>>::Handle> +
     Done,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[bounds(
+    where
+        T: Error + 'static,
+        U: Error + 'static,
+        V: Error + 'static,
+)]
 pub enum Tuple1UnravelError<T, U, V> {
-    Transport(T),
-    Dispatch(U),
-    Target(V),
+    #[error("failed to write handle for tuple: {0}")]
+    Transport(#[source] T),
+    #[error("failed to fork element in tuple: {0}")]
+    Dispatch(#[source] U),
+    #[error("failed to finalize element in tuple: {0}")]
+    Target(#[source] V),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[bounds(
+    where
+        T: Error + 'static,
+        U: Error + 'static,
+)]
 pub enum Tuple1CoalesceError<T, U> {
-    Transport(T),
-    Dispatch(U),
+    #[error("failed to read handle for tuple: {0}")]
+    Transport(#[source] T),
+    #[error("failed to join element in tuple: {0}")]
+    Dispatch(#[source] U),
 }
 
 impl<T: Unpin, C: ?Sized + Write<<C as Dispatch<T>>::Handle> + Fork<T> + Unpin> Future<C>
@@ -842,18 +868,18 @@ where
 }
 
 tuple_impls! {
-    Tuple3Coalesce  Tuple3CoalesceState  Tuple3Unravel  Tuple3UnravelState  Tuple3UnravelError  Tuple3CoalesceError  Tuple3TargetError  => (0 (T0 T1) 1 (T1 T2 2)) 2 T2
-    Tuple4Coalesce  Tuple4CoalesceState  Tuple4Unravel  Tuple4UnravelState  Tuple4UnravelError  Tuple4CoalesceError  Tuple4TargetError  => (0 (T0 T1) 1 (T1 T2 2) 2 (T2 T3 3)) 3 T3
-    Tuple5Coalesce  Tuple5CoalesceState  Tuple5Unravel  Tuple5UnravelState  Tuple5UnravelError  Tuple5CoalesceError  Tuple5TargetError  => (0 (T0 T1) 1 (T1 T2 2) 2 (T2 T3 3) 3 (T3 T4 4)) 4 T4
-    Tuple6Coalesce  Tuple6CoalesceState  Tuple6Unravel  Tuple6UnravelState  Tuple6UnravelError  Tuple6CoalesceError  Tuple6TargetError  => (0 (T0 T1) 1 (T1 T2 2) 2 (T2 T3 3) 3 (T3 T4 4) 4 (T4 T5 5)) 5 T5
-    Tuple7Coalesce  Tuple7CoalesceState  Tuple7Unravel  Tuple7UnravelState  Tuple7UnravelError  Tuple7CoalesceError  Tuple7TargetError  => (0 (T0 T1) 1 (T1 T2 2) 2 (T2 T3 3) 3 (T3 T4 4) 4 (T4 T5 5) 5 (T5 T6 6)) 6 T6
-    Tuple8Coalesce  Tuple8CoalesceState  Tuple8Unravel  Tuple8UnravelState  Tuple8UnravelError  Tuple8CoalesceError  Tuple8TargetError  => (0 (T0 T1) 1 (T1 T2 2) 2 (T2 T3 3) 3 (T3 T4 4) 4 (T4 T5 5) 5 (T5 T6 6) 6 (T6 T7 7)) 7 T7
-    Tuple9Coalesce  Tuple9CoalesceState  Tuple9Unravel  Tuple9UnravelState  Tuple9UnravelError  Tuple9CoalesceError  Tuple9TargetError  => (0 (T0 T1) 1 (T1 T2 2) 2 (T2 T3 3) 3 (T3 T4 4) 4 (T4 T5 5) 5 (T5 T6 6) 6 (T6 T7 7) 7 (T7 T8 8)) 8 T8
-    Tuple10Coalesce Tuple10CoalesceState Tuple10Unravel Tuple10UnravelState Tuple10UnravelError Tuple10CoalesceError Tuple10TargetError => (0 (T0 T1) 1 (T1 T2 2) 2 (T2 T3 3) 3 (T3 T4 4) 4 (T4 T5 5) 5 (T5 T6 6) 6 (T6 T7 7) 7 (T7 T8 8) 8 (T8 T9 9)) 9 T9
-    Tuple11Coalesce Tuple11CoalesceState Tuple11Unravel Tuple11UnravelState Tuple11UnravelError Tuple11CoalesceError Tuple11TargetError => (0 (T0 T1) 1 (T1 T2 2) 2 (T2 T3 3) 3 (T3 T4 4) 4 (T4 T5 5) 5 (T5 T6 6) 6 (T6 T7 7) 7 (T7 T8 8) 8 (T8 T9 9) 9 (T9 T10 10)) 10 T10
-    Tuple12Coalesce Tuple12CoalesceState Tuple12Unravel Tuple12UnravelState Tuple12UnravelError Tuple12CoalesceError Tuple12TargetError => (0 (T0 T1) 1 (T1 T2 2) 2 (T2 T3 3) 3 (T3 T4 4) 4 (T4 T5 5) 5 (T5 T6 6) 6 (T6 T7 7) 7 (T7 T8 8) 8 (T8 T9 9) 9 (T9 T10 10) 10 (T10 T11 11)) 11 T11
-    Tuple13Coalesce Tuple13CoalesceState Tuple13Unravel Tuple13UnravelState Tuple13UnravelError Tuple13CoalesceError Tuple13TargetError => (0 (T0 T1) 1 (T1 T2 2) 2 (T2 T3 3) 3 (T3 T4 4) 4 (T4 T5 5) 5 (T5 T6 6) 6 (T6 T7 7) 7 (T7 T8 8) 8 (T8 T9 9) 9 (T9 T10 10) 10 (T10 T11 11) 11 (T11 T12 12)) 12 T12
-    Tuple14Coalesce Tuple14CoalesceState Tuple14Unravel Tuple14UnravelState Tuple14UnravelError Tuple14CoalesceError Tuple14TargetError => (0 (T0 T1) 1 (T1 T2 2) 2 (T2 T3 3) 3 (T3 T4 4) 4 (T4 T5 5) 5 (T5 T6 6) 6 (T6 T7 7) 7 (T7 T8 8) 8 (T8 T9 9) 9 (T9 T10 10) 10 (T10 T11 11) 11 (T11 T12 12) 12 (T12 T13 13)) 13 T13
-    Tuple15Coalesce Tuple15CoalesceState Tuple15Unravel Tuple15UnravelState Tuple15UnravelError Tuple15CoalesceError Tuple15TargetError => (0 (T0 T1) 1 (T1 T2 2) 2 (T2 T3 3) 3 (T3 T4 4) 4 (T4 T5 5) 5 (T5 T6 6) 6 (T6 T7 7) 7 (T7 T8 8) 8 (T8 T9 9) 9 (T9 T10 10) 10 (T10 T11 11) 11 (T11 T12 12) 12 (T12 T13 13) 13 (T13 T14 14)) 14 T14
-    Tuple16Coalesce Tuple16CoalesceState Tuple16Unravel Tuple16UnravelState Tuple16UnravelError Tuple16CoalesceError Tuple16TargetError => (0 (T0 T1) 1 (T1 T2 2) 2 (T2 T3 3) 3 (T3 T4 4) 4 (T4 T5 5) 5 (T5 T6 6) 6 (T6 T7 7) 7 (T7 T8 8) 8 (T8 T9 9) 9 (T9 T10 10) 10 (T10 T11 11) 11 (T11 T12 12) 12 (T12 T13 13) 13 (T13 T14 14) 14 (T14 T15 15)) 15 T15
+    Tuple3Coalesce  Tuple3CoalesceState  Tuple3Unravel  Tuple3UnravelState  Tuple3UnravelError  Tuple3CoalesceError  => (0 (T0 T1) 1 (T1 T2 2)) 2 T2
+    // Tuple4Coalesce  Tuple4CoalesceState  Tuple4Unravel  Tuple4UnravelState  Tuple4UnravelError  Tuple4CoalesceError  => (0 (T0 T1) 1 (T1 T2 2) 2 (T2 T3 3)) 3 T3
+    // Tuple5Coalesce  Tuple5CoalesceState  Tuple5Unravel  Tuple5UnravelState  Tuple5UnravelError  Tuple5CoalesceError  => (0 (T0 T1) 1 (T1 T2 2) 2 (T2 T3 3) 3 (T3 T4 4)) 4 T4
+    // Tuple6Coalesce  Tuple6CoalesceState  Tuple6Unravel  Tuple6UnravelState  Tuple6UnravelError  Tuple6CoalesceError  => (0 (T0 T1) 1 (T1 T2 2) 2 (T2 T3 3) 3 (T3 T4 4) 4 (T4 T5 5)) 5 T5
+    // Tuple7Coalesce  Tuple7CoalesceState  Tuple7Unravel  Tuple7UnravelState  Tuple7UnravelError  Tuple7CoalesceError  => (0 (T0 T1) 1 (T1 T2 2) 2 (T2 T3 3) 3 (T3 T4 4) 4 (T4 T5 5) 5 (T5 T6 6)) 6 T6
+    // Tuple8Coalesce  Tuple8CoalesceState  Tuple8Unravel  Tuple8UnravelState  Tuple8UnravelError  Tuple8CoalesceError  => (0 (T0 T1) 1 (T1 T2 2) 2 (T2 T3 3) 3 (T3 T4 4) 4 (T4 T5 5) 5 (T5 T6 6) 6 (T6 T7 7)) 7 T7
+    // Tuple9Coalesce  Tuple9CoalesceState  Tuple9Unravel  Tuple9UnravelState  Tuple9UnravelError  Tuple9CoalesceError  => (0 (T0 T1) 1 (T1 T2 2) 2 (T2 T3 3) 3 (T3 T4 4) 4 (T4 T5 5) 5 (T5 T6 6) 6 (T6 T7 7) 7 (T7 T8 8)) 8 T8
+    // Tuple10Coalesce Tuple10CoalesceState Tuple10Unravel Tuple10UnravelState Tuple10UnravelError Tuple10CoalesceError => (0 (T0 T1) 1 (T1 T2 2) 2 (T2 T3 3) 3 (T3 T4 4) 4 (T4 T5 5) 5 (T5 T6 6) 6 (T6 T7 7) 7 (T7 T8 8) 8 (T8 T9 9)) 9 T9
+    // Tuple11Coalesce Tuple11CoalesceState Tuple11Unravel Tuple11UnravelState Tuple11UnravelError Tuple11CoalesceError => (0 (T0 T1) 1 (T1 T2 2) 2 (T2 T3 3) 3 (T3 T4 4) 4 (T4 T5 5) 5 (T5 T6 6) 6 (T6 T7 7) 7 (T7 T8 8) 8 (T8 T9 9) 9 (T9 T10 10)) 10 T10
+    // Tuple12Coalesce Tuple12CoalesceState Tuple12Unravel Tuple12UnravelState Tuple12UnravelError Tuple12CoalesceError => (0 (T0 T1) 1 (T1 T2 2) 2 (T2 T3 3) 3 (T3 T4 4) 4 (T4 T5 5) 5 (T5 T6 6) 6 (T6 T7 7) 7 (T7 T8 8) 8 (T8 T9 9) 9 (T9 T10 10) 10 (T10 T11 11)) 11 T11
+    // Tuple13Coalesce Tuple13CoalesceState Tuple13Unravel Tuple13UnravelState Tuple13UnravelError Tuple13CoalesceError => (0 (T0 T1) 1 (T1 T2 2) 2 (T2 T3 3) 3 (T3 T4 4) 4 (T4 T5 5) 5 (T5 T6 6) 6 (T6 T7 7) 7 (T7 T8 8) 8 (T8 T9 9) 9 (T9 T10 10) 10 (T10 T11 11) 11 (T11 T12 12)) 12 T12
+    // Tuple14Coalesce Tuple14CoalesceState Tuple14Unravel Tuple14UnravelState Tuple14UnravelError Tuple14CoalesceError => (0 (T0 T1) 1 (T1 T2 2) 2 (T2 T3 3) 3 (T3 T4 4) 4 (T4 T5 5) 5 (T5 T6 6) 6 (T6 T7 7) 7 (T7 T8 8) 8 (T8 T9 9) 9 (T9 T10 10) 10 (T10 T11 11) 11 (T11 T12 12) 12 (T12 T13 13)) 13 T13
+    // Tuple15Coalesce Tuple15CoalesceState Tuple15Unravel Tuple15UnravelState Tuple15UnravelError Tuple15CoalesceError => (0 (T0 T1) 1 (T1 T2 2) 2 (T2 T3 3) 3 (T3 T4 4) 4 (T4 T5 5) 5 (T5 T6 6) 6 (T6 T7 7) 7 (T7 T8 8) 8 (T8 T9 9) 9 (T9 T10 10) 10 (T10 T11 11) 11 (T11 T12 12) 12 (T12 T13 13) 13 (T13 T14 14)) 14 T14
+    // Tuple16Coalesce Tuple16CoalesceState Tuple16Unravel Tuple16UnravelState Tuple16UnravelError Tuple16CoalesceError => (0 (T0 T1) 1 (T1 T2 2) 2 (T2 T3 3) 3 (T3 T4 4) 4 (T4 T5 5) 5 (T5 T6 6) 6 (T6 T7 7) 7 (T7 T8 8) 8 (T8 T9 9) 9 (T9 T10 10) 10 (T10 T11 11) 11 (T11 T12 12) 12 (T12 T13 13) 13 (T13 T14 14) 14 (T14 T15 15)) 15 T15
 }
