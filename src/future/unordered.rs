@@ -354,8 +354,16 @@ macro_rules! tuple_impls {
     ($($error:ident => ($($n:tt $name:ident)+))+) => {
         $(
             #[doc(hidden)]
+            #[derive(Debug, Error)]
+            #[bounds(
+                where
+                    $($name: Error + 'static,)+
+            )]
             pub enum $error<$($name,)+> {
-                $($name($name),)+
+                $(
+                    #[error("error in Unordered for tuple variant")]
+                    $name(#[source] $name),
+                )+
             }
 
             impl<$($name,)+> Futures for ($(Option<$name>,)+) {
