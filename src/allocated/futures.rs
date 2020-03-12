@@ -36,7 +36,7 @@ pub struct FutureCoalesce<
     state: FutureCoalesceState<C::Output>,
 }
 
-pub enum ErasedFutureUnravel<
+pub enum FutureUnravel<
     T: future::Future,
     C: ?Sized + Write<<C as Dispatch<T::Output>>::Handle> + Fork<T::Output> + Unpin,
 > {
@@ -55,7 +55,7 @@ pub enum ErasedFutureUnravel<
         U: Error + 'static,
         V: Error + 'static,
 )]
-pub enum ErasedFutureUnravelError<T, U, V> {
+pub enum FutureUnravelError<T, U, V> {
     #[error("failed to write handle for erased future: {0}")]
     Transport(#[source] T),
     #[error("failed to fork erased future content: {0}")]
@@ -67,14 +67,14 @@ pub enum ErasedFutureUnravelError<T, U, V> {
 impl<
         T: future::Future + Unpin,
         C: ?Sized + Write<<C as Dispatch<T::Output>>::Handle> + Fork<T::Output> + Unpin,
-    > Future<C> for ErasedFutureUnravel<T, C>
+    > Future<C> for FutureUnravel<T, C>
 where
     C::Future: Unpin,
     C::Target: Unpin,
     C::Handle: Unpin,
 {
     type Ok = ();
-    type Error = ErasedFutureUnravelError<
+    type Error = FutureUnravelError<
         C::Error,
         <C::Future as Future<C>>::Error,
         <C::Target as Future<C>>::Error,
@@ -91,45 +91,42 @@ where
 
         loop {
             match this {
-                ErasedFutureUnravel::Future(future) => {
+                FutureUnravel::Future(future) => {
                     let item = ready!(Pin::new(future).poll(cx));
-                    replace(this, ErasedFutureUnravel::Fork(ctx.fork(item)));
+                    replace(this, FutureUnravel::Fork(ctx.fork(item)));
                 }
-                ErasedFutureUnravel::Fork(future) => {
+                FutureUnravel::Fork(future) => {
                     let (target, handle) = ready!(Pin::new(&mut *future).poll(cx, &mut *ctx))
-                        .map_err(ErasedFutureUnravelError::Dispatch)?;
-                    replace(this, ErasedFutureUnravel::Write(handle, target));
+                        .map_err(FutureUnravelError::Dispatch)?;
+                    replace(this, FutureUnravel::Write(handle, target));
                 }
-                ErasedFutureUnravel::Write(_, _) => {
+                FutureUnravel::Write(_, _) => {
                     let mut ctx = Pin::new(&mut *ctx);
-                    ready!(ctx.as_mut().poll_ready(cx))
-                        .map_err(ErasedFutureUnravelError::Transport)?;
-                    let data = replace(this, ErasedFutureUnravel::Done);
-                    if let ErasedFutureUnravel::Write(data, target) = data {
-                        ctx.write(data)
-                            .map_err(ErasedFutureUnravelError::Transport)?;
-                        replace(this, ErasedFutureUnravel::Flush(target));
+                    ready!(ctx.as_mut().poll_ready(cx)).map_err(FutureUnravelError::Transport)?;
+                    let data = replace(this, FutureUnravel::Done);
+                    if let FutureUnravel::Write(data, target) = data {
+                        ctx.write(data).map_err(FutureUnravelError::Transport)?;
+                        replace(this, FutureUnravel::Flush(target));
                     } else {
                         panic!("invalid state in Tuple1Unravel Write")
                     }
                 }
-                ErasedFutureUnravel::Flush(_) => {
+                FutureUnravel::Flush(_) => {
                     ready!(Pin::new(&mut *ctx).poll_ready(cx))
-                        .map_err(ErasedFutureUnravelError::Transport)?;
-                    let data = replace(this, ErasedFutureUnravel::Done);
-                    if let ErasedFutureUnravel::Flush(target) = data {
-                        replace(this, ErasedFutureUnravel::Target(target));
+                        .map_err(FutureUnravelError::Transport)?;
+                    let data = replace(this, FutureUnravel::Done);
+                    if let FutureUnravel::Flush(target) = data {
+                        replace(this, FutureUnravel::Target(target));
                     } else {
                         panic!("invalid state in Tuple1Unravel Write")
                     }
                 }
-                ErasedFutureUnravel::Target(target) => {
-                    ready!(Pin::new(target).poll(cx, ctx))
-                        .map_err(ErasedFutureUnravelError::Target)?;
-                    replace(this, ErasedFutureUnravel::Done);
+                FutureUnravel::Target(target) => {
+                    ready!(Pin::new(target).poll(cx, ctx)).map_err(FutureUnravelError::Target)?;
+                    replace(this, FutureUnravel::Done);
                     return Poll::Ready(Ok(()));
                 }
-                ErasedFutureUnravel::Done => panic!("Tuple1Unravel polled after completion"),
+                FutureUnravel::Done => panic!("Tuple1Unravel polled after completion"),
             }
         }
     }
@@ -284,10 +281,10 @@ macro_rules! marker_variants {
                 C::Target: Unpin,
                 C::Handle: Unpin,
             {
-                type Future = ErasedFutureUnravel<Self, C>;
+                type Future = FutureUnravel<Self, C>;
 
                 fn unravel(self) -> Self::Future {
-                    ErasedFutureUnravel::Future(self)
+                    FutureUnravel::Future(self)
                 }
             }
         )*
