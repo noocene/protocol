@@ -108,7 +108,7 @@ where
                         ctx.write(data).map_err(FutureUnravelError::Transport)?;
                         replace(this, FutureUnravel::Flush(target));
                     } else {
-                        panic!("invalid state in Tuple1Unravel Write")
+                        panic!("invalid state in FutureUnravel Write")
                     }
                 }
                 FutureUnravel::Flush(_) => {
@@ -118,7 +118,7 @@ where
                     if let FutureUnravel::Flush(target) = data {
                         replace(this, FutureUnravel::Target(target));
                     } else {
-                        panic!("invalid state in Tuple1Unravel Write")
+                        panic!("invalid state in FutureUnravel Write")
                     }
                 }
                 FutureUnravel::Target(target) => {
@@ -126,7 +126,7 @@ where
                     replace(this, FutureUnravel::Done);
                     return Poll::Ready(Ok(()));
                 }
-                FutureUnravel::Done => panic!("Tuple1Unravel polled after completion"),
+                FutureUnravel::Done => panic!("FutureUnravel polled after completion"),
             }
         }
     }
@@ -180,7 +180,7 @@ where
                     replace(&mut *self, ErasedFutureCoalesce::Done);
                     return Poll::Ready(Ok(item));
                 }
-                ErasedFutureCoalesce::Done => panic!("Tuple1Unravel polled after completion"),
+                ErasedFutureCoalesce::Done => panic!("FutureUnravel polled after completion"),
             }
         }
     }
