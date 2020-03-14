@@ -1,6 +1,7 @@
 use super::{FromError, ProtocolError};
 use crate::{
-    Coalesce, Contextualize, Contextualizer, Dispatch, Fork, Future, Join, Read, Unravel, Write,
+    Coalesce, CoalesceContextualizer, ContextualizeCoalesce, Dispatch, Fork, Future, Join, Read,
+    Unravel, Write,
 };
 use alloc::boxed::Box;
 use core::{
@@ -24,9 +25,13 @@ pub enum FutureCoalesceState<T> {
 pub struct FutureCoalesce<
     'a,
     O,
-    P: Fn(<C as Contextualize<ErasedFutureCoalesce<T, <C as Contextualizer>::Target>>>::Future) -> O,
+    P: Fn(
+        <C as ContextualizeCoalesce<
+            ErasedFutureCoalesce<T, <C as CoalesceContextualizer>::Target>,
+        >>::Future,
+    ) -> O,
     T: Unpin,
-    C: ?Sized + Contextualize<ErasedFutureCoalesce<T, <C as Contextualizer>::Target>>,
+    C: ?Sized + ContextualizeCoalesce<ErasedFutureCoalesce<T, <C as CoalesceContextualizer>::Target>>,
 > where
     C::Target: Unpin + Read<<C::Target as Dispatch<T>>::Handle> + Join<T>,
     <C::Target as Join<T>>::Future: Unpin,
@@ -191,7 +196,8 @@ impl<
         O,
         P: Fn(C::Future) -> O,
         T: Unpin,
-        C: ?Sized + Contextualize<ErasedFutureCoalesce<T, <C as Contextualizer>::Target>>,
+        C: ?Sized
+            + ContextualizeCoalesce<ErasedFutureCoalesce<T, <C as CoalesceContextualizer>::Target>>,
     > Future<C> for FutureCoalesce<'a, O, P, T, C>
 where
     C::Output: Unpin,
@@ -241,7 +247,7 @@ macro_rules! marker_variants {
         $($marker:ident)*
     ),+) => {
         $(
-            impl<'a, T: Unpin + FromError<ProtocolError>, C: Contextualize<ErasedFutureCoalesce<T, <C as Contextualizer>::Target>>> Coalesce<C> for Pin<Box<dyn future::Future<Output = T> + 'a $(+ $marker)*>>
+            impl<'a, T: Unpin + FromError<ProtocolError>, C: ContextualizeCoalesce<ErasedFutureCoalesce<T, <C as CoalesceContextualizer>::Target>>> Coalesce<C> for Pin<Box<dyn future::Future<Output = T> + 'a $(+ $marker)*>>
             where
                 C::Output: Unpin,
                 C::Future: 'a $(+ $marker)*,
@@ -253,7 +259,7 @@ macro_rules! marker_variants {
                 type Future = FutureCoalesce<'a, Self, fn(C::Future) -> Self, T, C>;
 
                 fn coalesce() -> Self::Future {
-                    fn conv<'a, T: Unpin + FromError<ProtocolError>, C: Contextualize<ErasedFutureCoalesce<T, <C as Contextualizer>::Target>>>(
+                    fn conv<'a, T: Unpin + FromError<ProtocolError>, C: ContextualizeCoalesce<ErasedFutureCoalesce<T, <C as CoalesceContextualizer>::Target>>>(
                         fut: C::Future,
                     ) -> Pin<Box<dyn future::Future<Output = T> + 'a $(+ $marker)*>>
                     where

@@ -49,11 +49,11 @@ pub trait Join<P>: Dispatch<P> {
     fn join(&mut self, handle: Self::Handle) -> Self::Future;
 }
 
-pub trait Contextualizer {
+pub trait CoalesceContextualizer {
     type Target;
 }
 
-pub trait Contextualize<F: Future<Self::Target>>: Contextualizer {
+pub trait ContextualizeCoalesce<F: Future<Self::Target>>: CoalesceContextualizer {
     type Future: cfuture::Future<Output = Result<F::Ok, F::Error>>;
     type Output: Future<Self, Ok = Self::Future>;
 
@@ -86,4 +86,12 @@ pub trait Read<T> {
     type Error;
 
     fn read(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<T, Self::Error>>;
+}
+
+impl<'a, T, U: Unpin + Read<T>> Read<T> for &'a mut U {
+    type Error = U::Error;
+
+    fn read(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<T, Self::Error>> {
+        <U as Read<T>>::read(Pin::new(&mut **self), cx)
+    }
 }

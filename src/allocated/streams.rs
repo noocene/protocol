@@ -1,6 +1,7 @@
 use super::{FromError, ProtocolError};
 use crate::{
-    Coalesce, Contextualize, Contextualizer, Dispatch, Fork, Future, Join, Read, Unravel, Write,
+    Coalesce, CoalesceContextualizer, ContextualizeCoalesce, Dispatch, Fork, Future, Join, Read,
+    Unravel, Write,
 };
 use alloc::boxed::Box;
 use core::{
@@ -24,9 +25,13 @@ pub enum StreamCoalesceState<T> {
 pub struct StreamCoalesce<
     'a,
     O,
-    P: Fn(<C as Contextualize<ErasedStreamCoalesce<T, <C as Contextualizer>::Target>>>::Future) -> O,
+    P: Fn(
+        <C as ContextualizeCoalesce<
+            ErasedStreamCoalesce<T, <C as CoalesceContextualizer>::Target>,
+        >>::Future,
+    ) -> O,
     T: Unpin,
-    C: ?Sized + Contextualize<ErasedStreamCoalesce<T, <C as Contextualizer>::Target>>,
+    C: ?Sized + ContextualizeCoalesce<ErasedStreamCoalesce<T, <C as CoalesceContextualizer>::Target>>,
 > where
     C::Target: Unpin + Read<Option<<C::Target as Dispatch<T>>::Handle>> + Join<T>,
     <C::Target as Join<T>>::Future: Unpin,
@@ -222,7 +227,8 @@ impl<
         O,
         P: Fn(C::Future) -> O,
         T: Unpin,
-        C: ?Sized + Contextualize<ErasedStreamCoalesce<T, <C as Contextualizer>::Target>>,
+        C: ?Sized
+            + ContextualizeCoalesce<ErasedStreamCoalesce<T, <C as CoalesceContextualizer>::Target>>,
     > Future<C> for StreamCoalesce<'a, O, P, T, C>
 where
     C::Output: Unpin,
@@ -272,7 +278,7 @@ macro_rules! marker_variants {
         $($marker:ident)*
     ),+) => {
         $(
-            impl<'a, T: Unpin + FromError<ProtocolError>, C: Contextualize<ErasedStreamCoalesce<T, <C as Contextualizer>::Target>>> Coalesce<C> for Pin<Box<dyn Stream<Item = T> + 'a $(+ $marker)*>>
+            impl<'a, T: Unpin + FromError<ProtocolError>, C: ContextualizeCoalesce<ErasedStreamCoalesce<T, <C as CoalesceContextualizer>::Target>>> Coalesce<C> for Pin<Box<dyn Stream<Item = T> + 'a $(+ $marker)*>>
             where
                 C::Output: Unpin,
                 C::Future: Unpin + 'a $(+ $marker)*,
@@ -284,7 +290,7 @@ macro_rules! marker_variants {
                 type Future = StreamCoalesce<'a, Self, fn(C::Future) -> Self, T, C>;
 
                 fn coalesce() -> Self::Future {
-                    fn conv<'a, T: Unpin + FromError<ProtocolError>, C: Contextualize<ErasedStreamCoalesce<T, <C as Contextualizer>::Target>>>(
+                    fn conv<'a, T: Unpin + FromError<ProtocolError>, C: ContextualizeCoalesce<ErasedStreamCoalesce<T, <C as CoalesceContextualizer>::Target>>>(
                         fut: C::Future,
                     ) -> Pin<Box<dyn Stream<Item = T> + 'a $(+ $marker)*>>
                     where
