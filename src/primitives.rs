@@ -15,7 +15,7 @@ pub struct PrimitiveUnravel<T> {
 }
 
 impl<T: Unpin, C: Unpin + Write<T>> Future<C> for PrimitiveUnravel<T> {
-    type Ok = ();
+    type Ok = Ready<(), <C as Write<T>>::Error>;
     type Error = <C as Write<T>>::Error;
 
     fn poll<R: BorrowMut<C>>(
@@ -40,7 +40,7 @@ impl<T: Unpin, C: Unpin + Write<T>> Future<C> for PrimitiveUnravel<T> {
                 }
             } else {
                 ready!(Pin::new(&mut *ctx).poll_flush(cx))?;
-                return Poll::Ready(Ok(()));
+                return Poll::Ready(Ok(ready(())));
             }
         }
     }
@@ -69,9 +69,10 @@ macro_rules! impl_primitives {
     ($($ty:ty)+) => {
         $(
             impl<C: Unpin + Write<Self>> Unravel<C> for $ty {
-                type Future = PrimitiveUnravel<Self>;
+                type Finalize = Ready<(), C::Error>;
+                type Target = PrimitiveUnravel<Self>;
 
-                fn unravel(self) -> Self::Future {
+                fn unravel(self) -> Self::Target {
                     PrimitiveUnravel { data: Some(self) }
                 }
             }
@@ -98,10 +99,11 @@ mod allocated {
 }
 
 impl<C: Unpin + Write<Self>> Unravel<C> for () {
-    type Future = Ready<()>;
+    type Finalize = Ready<()>;
+    type Target = Ready<Ready<()>>;
 
-    fn unravel(self) -> Self::Future {
-        ready(())
+    fn unravel(self) -> Self::Target {
+        ready(ready(()))
     }
 }
 
@@ -114,10 +116,11 @@ impl<C: Unpin + Read<Self>> Coalesce<C> for () {
 }
 
 impl<T: Unpin + ?Sized, C: Unpin + Write<Self>> Unravel<C> for PhantomData<T> {
-    type Future = Ready<()>;
+    type Finalize = Ready<()>;
+    type Target = Ready<Ready<()>>;
 
-    fn unravel(self) -> Self::Future {
-        ready(())
+    fn unravel(self) -> Self::Target {
+        ready(ready(()))
     }
 }
 
@@ -130,10 +133,11 @@ impl<T: Unpin + ?Sized, C: Unpin + Read<Self>> Coalesce<C> for PhantomData<T> {
 }
 
 impl<T: Unpin, C: Unpin + Write<Self>> Unravel<C> for [T; 0] {
-    type Future = Ready<()>;
+    type Finalize = Ready<()>;
+    type Target = Ready<Ready<()>>;
 
-    fn unravel(self) -> Self::Future {
-        ready(())
+    fn unravel(self) -> Self::Target {
+        ready(ready(()))
     }
 }
 

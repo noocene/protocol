@@ -1,9 +1,9 @@
 use crate::{
     future::{
-        ordered::{EventualOrdered, EventualOrderedError},
-        Ordered,
+        finalize::{EventualFinalize, EventualFinalizeError, TupleFinalizeInner},
+        Finalize, FutureExt, MapErr,
     },
-    ready, Coalesce, Dispatch, Fork, Future, Join, Read, Unravel, Write,
+    Coalesce, Dispatch, Fork, Future, Join, Read, Unravel, Write,
 };
 use core::{
     borrow::BorrowMut,
@@ -12,6 +12,7 @@ use core::{
     task::{Context, Poll},
 };
 use core_error::Error;
+use futures::ready;
 use thiserror::Error;
 
 macro_rules! tuple_impls {
@@ -44,8 +45,9 @@ macro_rules! tuple_impls {
                     $($ty: Error + 'static,)+
                     $last: Error + 'static,
                     T: Error + 'static,
+                    U: Error + 'static,
             )]
-            pub enum $u_error<E, $first, $($ty,)+ $last, T> {
+            pub enum $u_error<E, $first, $($ty,)+ $last, T, U> {
                 #[error("failed to write handle for tuple")]
                 Transport(#[source] E),
                 #[error("failed to fork element in tuple")]
@@ -56,8 +58,10 @@ macro_rules! tuple_impls {
                     #[error("failed to fork element in tuple")]
                     $ty(#[source] $ty),
                 )+
+                #[error("failed to target element in tuple")]
+                Target(#[source] T),
                 #[error("failed to finalize element in tuple")]
-                Target(#[source] T)
+                Finalize(#[source] U)
             }
 
             #[derive(Debug, Error)]
@@ -97,10 +101,14 @@ macro_rules! tuple_impls {
                     $(Option<<C as Dispatch<$ty>>::Handle>,)+
                     Option<<C as Dispatch<$last>>::Handle>,
                 ),
-                targets: EventualOrdered<(
+                targets: EventualFinalize<C, (
                     Option<<C as Fork<$first>>::Target>,
                     $(Option<<C as Fork<$ty>>::Target>,)+
                     Option<<C as Fork<$last>>::Target>,
+                ), (
+                    $first,
+                    $($ty,)+
+                    $last,
                 )>,
                 data: (Option<$first>, $(Option<$ty>,)+ Option<$last>),
                 state: $ustate<<C as Fork<$first>>::Future, $(<C as Fork<$ty>>::Future,)+ <C as Fork<$last>>::Future>
@@ -138,23 +146,69 @@ macro_rules! tuple_impls {
             where
                 <C as Fork<$first>>::Future: Unpin,
                 <C as Fork<$first>>::Target: Unpin,
+                <C as Fork<$first>>::Finalize: Unpin,
                 <C as Dispatch<$first>>::Handle: Unpin,
                 <C as Fork<$last>>::Future: Unpin,
+                <C as Fork<$last>>::Finalize: Unpin,
                 <C as Fork<$last>>::Target: Unpin,
                 <C as Dispatch<$last>>::Handle: Unpin,
                 $(<C as Fork<$ty>>::Future: Unpin,)+
+                $(<C as Fork<$ty>>::Finalize: Unpin,)+
                 $(<C as Fork<$ty>>::Target: Unpin,)+
                 $(<C as Dispatch<$ty>>::Handle: Unpin,)+
             {
-                type Ok = ();
+                type Ok = MapErr<
+                    TupleFinalizeInner<
+                        (
+                            Option<<C as Fork<$first>>::Finalize>,
+                            $(Option<<C as Fork<$ty>>::Finalize>,)+
+                            Option<<C as Fork<$last>>::Finalize>,
+                        ),
+                        ($first, $($ty,)+ $last),
+                    >,
+                    fn(
+                        <TupleFinalizeInner<
+                        (
+                            Option<<C as Fork<$first>>::Finalize>,
+                            $(Option<<C as Fork<$ty>>::Finalize>,)+
+                            Option<<C as Fork<$last>>::Finalize>,
+                        ),
+                        ($first, $($ty,)+ $last),
+                    > as Future<C>>::Error,
+                    ) -> $u_error<
+                    <C as Write<(<C as Dispatch<$first>>::Handle, $(<C as Dispatch<$ty>>::Handle,)+ <C as Dispatch<$last>>::Handle)>>::Error,
+                    <<C as Fork<$first>>::Future as Future<C>>::Error,
+                    $(<<C as Fork<$ty>>::Future as Future<C>>::Error,)+
+                    <<C as Fork<$last>>::Future as Future<C>>::Error,
+                    <Finalize<C, ($first,
+                    $($ty,)+
+                    $last)> as Future<C>>::Error,
+                        <TupleFinalizeInner<
+                        (
+                            Option<<C as Fork<$first>>::Finalize>,
+                            $(Option<<C as Fork<$ty>>::Finalize>,)+
+                            Option<<C as Fork<$last>>::Finalize>,
+                        ),
+                        ($first, $($ty,)+ $last),
+                    > as Future<C>>::Error,
+                    >,
+                >;
                 type Error = $u_error<
                     <C as Write<(<C as Dispatch<$first>>::Handle, $(<C as Dispatch<$ty>>::Handle,)+ <C as Dispatch<$last>>::Handle)>>::Error,
                     <<C as Fork<$first>>::Future as Future<C>>::Error,
                     $(<<C as Fork<$ty>>::Future as Future<C>>::Error,)+
                     <<C as Fork<$last>>::Future as Future<C>>::Error,
-                    <Ordered<(Option<<C as Fork<$first>>::Target>,
-                    $(Option<<C as Fork<$ty>>::Target>,)+
-                    Option<<C as Fork<$last>>::Target>)> as Future<C>>::Error
+                    <Finalize<C, ($first,
+                    $($ty,)+
+                    $last)> as Future<C>>::Error,
+                    <TupleFinalizeInner<
+                        (
+                            Option<<C as Fork<$first>>::Finalize>,
+                            $(Option<<C as Fork<$ty>>::Finalize>,)+
+                            Option<<C as Fork<$last>>::Finalize>,
+                        ),
+                        ($first, $($ty,)+ $last),
+                    > as Future<C>>::Error
                 >;
 
                 fn poll<R: BorrowMut<C>>(
@@ -217,11 +271,11 @@ macro_rules! tuple_impls {
                                 replace(&mut this.state, $ustate::Target);
                             }
                             $ustate::Target => {
-                                ready!(Pin::new(&mut this.targets).poll(cx, &mut *ctx))
-                                    .map_err(EventualOrderedError::unwrap_complete)
+                                let finalize = ready!(Pin::new(&mut this.targets).poll(cx, &mut *ctx))
+                                    .map_err(EventualFinalizeError::unwrap_complete)
                                     .map_err($u_error::Target)?;
                                 replace(&mut this.state, $ustate::Done);
-                                return Poll::Ready(Ok(()));
+                                return Poll::Ready(Ok(FutureExt::<C>::map_err(finalize, $u_error::Finalize)));
                             }
                             $ustate::Done => panic!("Tuple unravel polled after completion"),
                         }
@@ -329,22 +383,62 @@ macro_rules! tuple_impls {
             where
                 <C as Fork<$first>>::Future: Unpin,
                 <C as Fork<$first>>::Target: Unpin,
+                <C as Fork<$first>>::Finalize: Unpin,
                 <C as Dispatch<$first>>::Handle: Unpin,
                 <C as Fork<$last>>::Future: Unpin,
                 <C as Fork<$last>>::Target: Unpin,
+                <C as Fork<$last>>::Finalize: Unpin,
                 <C as Dispatch<$last>>::Handle: Unpin,
                 $(<C as Fork<$ty>>::Future: Unpin,)+
+                $(<C as Fork<$ty>>::Finalize: Unpin,)+
                 $(<C as Fork<$ty>>::Target: Unpin,)+
                 $(<C as Dispatch<$ty>>::Handle: Unpin,)+
             {
-                type Future = $unravel<$first, $($ty,)+ $last, C>;
+                type Finalize = MapErr<
+                    TupleFinalizeInner<
+                        (
+                            Option<<C as Fork<$first>>::Finalize>,
+                            $(Option<<C as Fork<$ty>>::Finalize>,)+
+                            Option<<C as Fork<$last>>::Finalize>,
+                        ),
+                        ($first, $($ty,)+ $last),
+                    >,
+                    fn(
+                        <TupleFinalizeInner<
+                        (
+                            Option<<C as Fork<$first>>::Finalize>,
+                            $(Option<<C as Fork<$ty>>::Finalize>,)+
+                            Option<<C as Fork<$last>>::Finalize>,
+                        ),
+                        ($first, $($ty,)+ $last),
+                    > as Future<C>>::Error,
+                    ) -> $u_error<
+                    <C as Write<(<C as Dispatch<$first>>::Handle, $(<C as Dispatch<$ty>>::Handle,)+ <C as Dispatch<$last>>::Handle)>>::Error,
+                    <<C as Fork<$first>>::Future as Future<C>>::Error,
+                    $(<<C as Fork<$ty>>::Future as Future<C>>::Error,)+
+                    <<C as Fork<$last>>::Future as Future<C>>::Error,
+                    <Finalize<C, ($first,
+                    $($ty,)+
+                    $last)> as Future<C>>::Error,
+                        <TupleFinalizeInner<
+                        (
+                            Option<<C as Fork<$first>>::Finalize>,
+                            $(Option<<C as Fork<$ty>>::Finalize>,)+
+                            Option<<C as Fork<$last>>::Finalize>,
+                        ),
+                        ($first, $($ty,)+ $last),
+                    > as Future<C>>::Error,
+                    >,
+                >;
 
-                fn unravel(self) -> Self::Future {
+                type Target = $unravel<$first, $($ty,)+ $last, C>;
+
+                fn unravel(self) -> Self::Target {
                     $unravel {
                         data: (Some(self.0), $(Some(self.$n),)+ Some(self.$last_n)),
                         state: $ustate::None,
                         handles: (None::<<C as Dispatch<$first>>::Handle>, $(None::<<C as Dispatch<$ty>>::Handle>,)+ None::<<C as Dispatch<$last>>::Handle>),
-                        targets: EventualOrdered::new((None::<<C as Fork<$first>>::Target>, $(None::<<C as Fork<$ty>>::Target>,)+ None::<<C as Fork<$last>>::Target>)),
+                        targets: EventualFinalize::new((None::<<C as Fork<$first>>::Target>, $(None::<<C as Fork<$ty>>::Target>,)+ None::<<C as Fork<$last>>::Target>)),
                     }
                 }
             }
@@ -404,16 +498,19 @@ enum Tuple2CoalesceState<T, U> {
         U: Error + 'static,
         V: Error + 'static,
         W: Error + 'static,
+        X: Error + 'static,
 )]
-pub enum Tuple2UnravelError<T, U, V, W> {
+pub enum Tuple2UnravelError<T, U, V, W, X> {
     #[error("failed to write handle for tuple: {0}")]
     Transport(#[source] T),
     #[error("failed to fork element in tuple: {0}")]
     DispatchT(#[source] U),
     #[error("failed to fork element in tuple: {0}")]
     DispatchU(#[source] V),
-    #[error("failed to finalize element in tuple: {0}")]
+    #[error("failed to target element in tuple: {0}")]
     Target(#[source] W),
+    #[error("failed to finalize element in tuple: {0}")]
+    Finalize(#[source] X),
 }
 
 #[derive(Debug, Error)]
@@ -445,10 +542,14 @@ pub struct Tuple2Unravel<
         Option<<C as Dispatch<T>>::Handle>,
         Option<<C as Dispatch<U>>::Handle>,
     ),
-    targets: EventualOrdered<(
-        Option<<C as Fork<T>>::Target>,
-        Option<<C as Fork<U>>::Target>,
-    )>,
+    targets: EventualFinalize<
+        C,
+        (
+            Option<<C as Fork<T>>::Target>,
+            Option<<C as Fork<U>>::Target>,
+        ),
+        (T, U),
+    >,
     data: (Option<T>, Option<U>),
     state: Tuple2UnravelState<<C as Fork<T>>::Future, <C as Fork<U>>::Future>,
 }
@@ -484,18 +585,53 @@ where
     <C as Fork<U>>::Future: Unpin,
     <C as Fork<T>>::Target: Unpin,
     <C as Fork<U>>::Target: Unpin,
+    <C as Fork<T>>::Finalize: Unpin,
+    <C as Fork<U>>::Finalize: Unpin,
     <C as Dispatch<T>>::Handle: Unpin,
     <C as Dispatch<U>>::Handle: Unpin,
 {
-    type Ok = ();
+    type Ok = MapErr<
+        TupleFinalizeInner<
+            (
+                Option<<C as Fork<T>>::Finalize>,
+                Option<<C as Fork<U>>::Finalize>,
+            ),
+            (T, U),
+        >,
+        fn(
+            <TupleFinalizeInner<
+                (
+                    Option<<C as Fork<T>>::Finalize>,
+                    Option<<C as Fork<U>>::Finalize>,
+                ),
+                (T, U),
+            > as Future<C>>::Error,
+        ) -> Tuple2UnravelError<
+            <C as Write<(<C as Dispatch<T>>::Handle, <C as Dispatch<U>>::Handle)>>::Error,
+            <<C as Fork<T>>::Future as Future<C>>::Error,
+            <<C as Fork<U>>::Future as Future<C>>::Error,
+            <Finalize<C, (T, U)> as Future<C>>::Error,
+            <TupleFinalizeInner<
+                (
+                    Option<<C as Fork<T>>::Finalize>,
+                    Option<<C as Fork<U>>::Finalize>,
+                ),
+                (T, U),
+            > as Future<C>>::Error,
+        >,
+    >;
     type Error = Tuple2UnravelError<
         <C as Write<(<C as Dispatch<T>>::Handle, <C as Dispatch<U>>::Handle)>>::Error,
         <<C as Fork<T>>::Future as Future<C>>::Error,
         <<C as Fork<U>>::Future as Future<C>>::Error,
-        <Ordered<(
-            Option<<C as Fork<T>>::Target>,
-            Option<<C as Fork<U>>::Target>,
-        )> as Future<C>>::Error,
+        <Finalize<C, (T, U)> as Future<C>>::Error,
+        <TupleFinalizeInner<
+            (
+                Option<<C as Fork<T>>::Finalize>,
+                Option<<C as Fork<U>>::Finalize>,
+            ),
+            (T, U),
+        > as Future<C>>::Error,
     >;
 
     fn poll<R: BorrowMut<C>>(
@@ -553,11 +689,14 @@ where
                     replace(&mut this.state, Tuple2UnravelState::Target);
                 }
                 Tuple2UnravelState::Target => {
-                    ready!(Pin::new(&mut this.targets).poll(cx, &mut *ctx))
-                        .map_err(EventualOrderedError::unwrap_complete)
+                    let finalize = ready!(Pin::new(&mut this.targets).poll(cx, &mut *ctx))
+                        .map_err(EventualFinalizeError::unwrap_complete)
                         .map_err(Tuple2UnravelError::Target)?;
                     replace(&mut this.state, Tuple2UnravelState::Done);
-                    return Poll::Ready(Ok(()));
+                    return Poll::Ready(Ok(FutureExt::<C>::map_err(
+                        finalize,
+                        Tuple2UnravelError::Finalize,
+                    )));
                 }
                 Tuple2UnravelState::Done => panic!("Tuple unravel polled after completion"),
             }
@@ -651,16 +790,48 @@ where
     <C as Fork<U>>::Future: Unpin,
     <C as Fork<T>>::Target: Unpin,
     <C as Fork<U>>::Target: Unpin,
+    <C as Fork<T>>::Finalize: Unpin,
+    <C as Fork<U>>::Finalize: Unpin,
     <C as Dispatch<T>>::Handle: Unpin,
     <C as Dispatch<U>>::Handle: Unpin,
 {
-    type Future = Tuple2Unravel<T, U, C>;
+    type Finalize = MapErr<
+        TupleFinalizeInner<
+            (
+                Option<<C as Fork<T>>::Finalize>,
+                Option<<C as Fork<U>>::Finalize>,
+            ),
+            (T, U),
+        >,
+        fn(
+            <TupleFinalizeInner<
+                (
+                    Option<<C as Fork<T>>::Finalize>,
+                    Option<<C as Fork<U>>::Finalize>,
+                ),
+                (T, U),
+            > as Future<C>>::Error,
+        ) -> Tuple2UnravelError<
+            <C as Write<(<C as Dispatch<T>>::Handle, <C as Dispatch<U>>::Handle)>>::Error,
+            <<C as Fork<T>>::Future as Future<C>>::Error,
+            <<C as Fork<U>>::Future as Future<C>>::Error,
+            <Finalize<C, (T, U)> as Future<C>>::Error,
+            <TupleFinalizeInner<
+                (
+                    Option<<C as Fork<T>>::Finalize>,
+                    Option<<C as Fork<U>>::Finalize>,
+                ),
+                (T, U),
+            > as Future<C>>::Error,
+        >,
+    >;
+    type Target = Tuple2Unravel<T, U, C>;
 
-    fn unravel(self) -> Self::Future {
+    fn unravel(self) -> Self::Target {
         Tuple2Unravel {
             data: (Some(self.0), Some(self.1)),
             handles: (None, None),
-            targets: EventualOrdered::new((None, None)),
+            targets: EventualFinalize::new((None, None)),
             state: Tuple2UnravelState::None,
         }
     }
@@ -743,7 +914,16 @@ where
     C::Target: Unpin,
     C::Handle: Unpin,
 {
-    type Ok = ();
+    type Ok = MapErr<
+        C::Finalize,
+        fn(
+            <C::Finalize as Future<C>>::Error,
+        ) -> Tuple1UnravelError<
+            C::Error,
+            <C::Future as Future<C>>::Error,
+            <C::Target as Future<C>>::Error,
+        >,
+    >;
     type Error = Tuple1UnravelError<
         C::Error,
         <C::Future as Future<C>>::Error,
@@ -796,9 +976,10 @@ where
                     }
                 }
                 Tuple1Unravel::Target(target) => {
-                    ready!(Pin::new(target).poll(cx, ctx)).map_err(Tuple1UnravelError::Target)?;
+                    let finalize = ready!(Pin::new(target).poll(cx, ctx))
+                        .map_err(Tuple1UnravelError::Target)?;
                     replace(this, Tuple1Unravel::Done);
-                    return Poll::Ready(Ok(()));
+                    return Poll::Ready(Ok(finalize.map_err(Tuple1UnravelError::Target)));
                 }
                 Tuple1Unravel::Done => panic!("Tuple1Unravel polled after completion"),
             }
@@ -846,11 +1027,22 @@ impl<T: Unpin, C: ?Sized + Write<<C as Dispatch<T>>::Handle> + Fork<T> + Unpin> 
 where
     C::Future: Unpin,
     C::Target: Unpin,
+    C::Finalize: Unpin,
     C::Handle: Unpin,
 {
-    type Future = Tuple1Unravel<T, C>;
+    type Finalize = MapErr<
+        C::Finalize,
+        fn(
+            <C::Finalize as Future<C>>::Error,
+        ) -> Tuple1UnravelError<
+            C::Error,
+            <C::Future as Future<C>>::Error,
+            <C::Target as Future<C>>::Error,
+        >,
+    >;
+    type Target = Tuple1Unravel<T, C>;
 
-    fn unravel(self) -> Self::Future {
+    fn unravel(self) -> Self::Target {
         Tuple1Unravel::Data(self.0)
     }
 }

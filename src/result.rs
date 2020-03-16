@@ -1,4 +1,7 @@
-use crate::{ready, Coalesce, Dispatch, Fork, Future, Join, Read, Unravel, Write};
+use crate::{
+    future::{Either, MapErr},
+    Coalesce, Dispatch, Fork, Future, FutureExt, Join, Read, Unravel, Write,
+};
 use core::{
     borrow::BorrowMut,
     mem::replace,
@@ -6,7 +9,18 @@ use core::{
     task::{Context, Poll},
 };
 use core_error::Error;
+use futures::ready;
 use thiserror::Error;
+
+type UnravelError<C, T, E> = ResultUnravelError<
+    <<C as Fork<T>>::Future as Future<C>>::Error,
+    <<C as Fork<E>>::Future as Future<C>>::Error,
+    <C as Write<Result<<C as Dispatch<T>>::Handle, <C as Dispatch<E>>::Handle>>>::Error,
+    <<C as Fork<T>>::Target as Future<C>>::Error,
+    <<C as Fork<E>>::Target as Future<C>>::Error,
+    <<C as Fork<T>>::Finalize as Future<C>>::Error,
+    <<C as Fork<E>>::Finalize as Future<C>>::Error,
+>;
 
 pub enum ResultUnravel<
     T: Unpin,
@@ -86,19 +100,25 @@ pub enum ResultCoalesceError<T, E, U> {
         E: Error + 'static,
         U: Error + 'static,
         V: Error + 'static,
-        W: Error + 'static
+        W: Error + 'static,
+        X: Error + 'static,
+        Y: Error + 'static
 )]
-pub enum ResultUnravelError<T, E, U, V, W> {
+pub enum ResultUnravelError<T, E, U, V, W, X, Y> {
     #[error("failed to fork Ok variant of Result: {0}")]
     DispatchOk(#[source] T),
     #[error("failed to fork Err variant of Result: {0}")]
     DispatchErr(#[source] E),
-    #[error("failed to finalize Ok variant of Result: {0}")]
+    #[error("failed to target Ok variant of Result: {0}")]
     TargetOk(#[source] V),
-    #[error("failed to finalize Err variant of Result: {0}")]
+    #[error("failed to target Err variant of Result: {0}")]
     TargetErr(#[source] W),
     #[error("failed to write handle for Result: {0}")]
     Transport(#[source] U),
+    #[error("failed to target Ok variant of Result: {0}")]
+    FinalizeOk(#[source] X),
+    #[error("failed to target Err variant of Result: {0}")]
+    FinalizeErr(#[source] Y),
 }
 
 impl<
@@ -115,23 +135,28 @@ where
     <C as Fork<E>>::Future: Unpin,
     <C as Fork<T>>::Target: Unpin,
     <C as Fork<E>>::Target: Unpin,
+    <C as Fork<T>>::Finalize: Unpin,
+    <C as Fork<E>>::Finalize: Unpin,
     <C as Dispatch<T>>::Handle: Unpin,
     <C as Dispatch<E>>::Handle: Unpin,
 {
-    type Ok = ();
-    type Error = ResultUnravelError<
-        <<C as Fork<T>>::Future as Future<C>>::Error,
-        <<C as Fork<E>>::Future as Future<C>>::Error,
-        <C as Write<Result<<C as Dispatch<T>>::Handle, <C as Dispatch<E>>::Handle>>>::Error,
-        <<C as Fork<T>>::Target as Future<C>>::Error,
-        <<C as Fork<E>>::Target as Future<C>>::Error,
+    type Ok = Either<
+        MapErr<
+            <C as Fork<T>>::Finalize,
+            fn(<<C as Fork<T>>::Finalize as Future<C>>::Error) -> UnravelError<C, T, E>,
+        >,
+        MapErr<
+            <C as Fork<E>>::Finalize,
+            fn(<<C as Fork<E>>::Finalize as Future<C>>::Error) -> UnravelError<C, T, E>,
+        >,
     >;
+    type Error = UnravelError<C, T, E>;
 
     fn poll<R: BorrowMut<C>>(
         mut self: Pin<&mut Self>,
         cx: &mut Context,
         mut ctx: R,
-    ) -> Poll<Result<(), Self::Error>> {
+    ) -> Poll<Result<<Self as Future<C>>::Ok, Self::Error>> {
         let ctx = ctx.borrow_mut();
 
         let this = &mut *self;
@@ -207,17 +232,21 @@ where
                         panic!("invalid state in ResultUnravel Write")
                     }
                 }
-                ResultUnravel::ErrTarget(target) => {
-                    ready!(Pin::new(target).poll(cx, &mut *ctx))
-                        .map_err(ResultUnravelError::TargetErr)?;
-                    replace(this, ResultUnravel::Done);
-                    return Poll::Ready(Ok(()));
-                }
                 ResultUnravel::OkTarget(target) => {
-                    ready!(Pin::new(target).poll(cx, &mut *ctx))
+                    let finalize = ready!(Pin::new(target).poll(cx, &mut *ctx))
                         .map_err(ResultUnravelError::TargetOk)?;
                     replace(this, ResultUnravel::Done);
-                    return Poll::Ready(Ok(()));
+                    return Poll::Ready(Ok(FutureExt::<C>::into_left(
+                        finalize.map_err(ResultUnravelError::FinalizeOk),
+                    )));
+                }
+                ResultUnravel::ErrTarget(target) => {
+                    let finalize = ready!(Pin::new(target).poll(cx, &mut *ctx))
+                        .map_err(ResultUnravelError::TargetErr)?;
+                    replace(this, ResultUnravel::Done);
+                    return Poll::Ready(Ok(FutureExt::<C>::into_right(
+                        finalize.map_err(ResultUnravelError::FinalizeErr),
+                    )));
                 }
                 ResultUnravel::Done => panic!("ResultUnravel polled after completion"),
             }
@@ -303,12 +332,24 @@ where
     <C as Fork<E>>::Future: Unpin,
     <C as Fork<T>>::Target: Unpin,
     <C as Fork<E>>::Target: Unpin,
+    <C as Fork<T>>::Finalize: Unpin,
+    <C as Fork<E>>::Finalize: Unpin,
     <C as Dispatch<T>>::Handle: Unpin,
     <C as Dispatch<E>>::Handle: Unpin,
 {
-    type Future = ResultUnravel<T, E, C>;
+    type Finalize = Either<
+        MapErr<
+            <C as Fork<T>>::Finalize,
+            fn(<<C as Fork<T>>::Finalize as Future<C>>::Error) -> UnravelError<C, T, E>,
+        >,
+        MapErr<
+            <C as Fork<E>>::Finalize,
+            fn(<<C as Fork<E>>::Finalize as Future<C>>::Error) -> UnravelError<C, T, E>,
+        >,
+    >;
+    type Target = ResultUnravel<T, E, C>;
 
-    fn unravel(self) -> Self::Future {
+    fn unravel(self) -> Self::Target {
         self.into()
     }
 }

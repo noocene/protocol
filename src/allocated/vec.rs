@@ -1,6 +1,9 @@
 use crate::{
-    future::ordered::{EventualOrdered, EventualOrderedError},
-    ready, Coalesce, Dispatch, Fork, Future, Join, Read, Unravel, Write,
+    future::{
+        finalize::{EventualFinalize, EventualFinalizeError, VecFinalize},
+        MapErr,
+    },
+    Coalesce, Dispatch, Fork, Future, FutureExt, Join, Read, Unravel, Write,
 };
 use alloc::vec::{IntoIter, Vec};
 use core::{
@@ -12,6 +15,7 @@ use core::{
     task::{Context, Poll},
 };
 use core_error::Error;
+use futures::ready;
 use thiserror::Error;
 
 enum VecUnravelState {
@@ -27,7 +31,7 @@ pub struct VecUnravel<
 > {
     fork: Option<C::Future>,
     handles: Vec<C::Handle>,
-    targets: EventualOrdered<Vec<C::Target>>,
+    targets: EventualFinalize<C, Vec<C::Target>, Vec<T::Item>>,
     state: VecUnravelState,
     data: T::IntoIter,
 }
@@ -48,15 +52,18 @@ pub struct VecCoalesce<
     where
         T: Error + 'static,
         U: Error + 'static,
-        V: Error + 'static
+        V: Error + 'static,
+        W: Error + 'static
 )]
-pub enum VecUnravelError<T, U, V> {
+pub enum VecUnravelError<T, U, V, W> {
     #[error("failed to write handle for Vec: {0}")]
     Transport(#[source] T),
     #[error("failed to fork item in Vec: {0}")]
     Dispatch(#[source] U),
-    #[error("failed to finalize item in Vec: {0}")]
+    #[error("failed to target item in Vec: {0}")]
     Target(#[source] V),
+    #[error("failed to finalize item in Vec: {0}")]
+    Finalize(#[source] W),
 }
 
 #[derive(Debug, Error)]
@@ -80,11 +87,27 @@ where
     T::IntoIter: Unpin,
     C::Handle: Unpin,
     C::Target: Unpin,
+    T::Item: Unpin,
+    C::Finalize: Unpin,
     C::Future: Unpin,
 {
-    type Ok = ();
-    type Error =
-        VecUnravelError<C::Error, <C::Future as Future<C>>::Error, <C::Target as Future<C>>::Error>;
+    type Ok = MapErr<
+        VecFinalize<C, T::Item>,
+        fn(
+            <VecFinalize<C, T::Item> as Future<C>>::Error,
+        ) -> VecUnravelError<
+            C::Error,
+            <C::Future as Future<C>>::Error,
+            <C::Target as Future<C>>::Error,
+            <C::Finalize as Future<C>>::Error,
+        >,
+    >;
+    type Error = VecUnravelError<
+        C::Error,
+        <C::Future as Future<C>>::Error,
+        <C::Target as Future<C>>::Error,
+        <C::Finalize as Future<C>>::Error,
+    >;
 
     fn poll<R: BorrowMut<C>>(
         mut self: Pin<&mut Self>,
@@ -119,12 +142,12 @@ where
                         this.state = VecUnravelState::Targets;
                     }
                     VecUnravelState::Targets => {
-                        ready!(Pin::new(&mut this.targets)
+                        let finalize = ready!(Pin::new(&mut this.targets)
                             .poll(cx, &mut *ctx)
-                            .map_err(EventualOrderedError::unwrap_complete)
+                            .map_err(EventualFinalizeError::unwrap_complete)
                             .map_err(VecUnravelError::Target))?;
                         this.state = VecUnravelState::Done;
-                        return Poll::Ready(Ok(()));
+                        return Poll::Ready(Ok(finalize.map_err(VecUnravelError::Finalize)));
                     }
                     VecUnravelState::Done => panic!("VecUnravel polled after completion"),
                 }
@@ -189,17 +212,29 @@ where
     T: Unpin,
     C::Handle: Unpin,
     C::Future: Unpin,
+    C::Finalize: Unpin,
     C::Target: Unpin,
 {
-    type Future = VecUnravel<Rev<IntoIter<T>>, C>;
+    type Finalize = MapErr<
+        VecFinalize<C, T>,
+        fn(
+            <VecFinalize<C, T> as Future<C>>::Error,
+        ) -> VecUnravelError<
+            C::Error,
+            <C::Future as Future<C>>::Error,
+            <C::Target as Future<C>>::Error,
+            <C::Finalize as Future<C>>::Error,
+        >,
+    >;
+    type Target = VecUnravel<Rev<IntoIter<T>>, C>;
 
-    fn unravel(self) -> Self::Future {
+    fn unravel(self) -> Self::Target {
         let data = self.into_iter().rev();
 
         VecUnravel {
             fork: None,
             handles: Vec::with_capacity(data.size_hint().0),
-            targets: EventualOrdered::new(Vec::with_capacity(data.size_hint().0)),
+            targets: EventualFinalize::new(Vec::with_capacity(data.size_hint().0)),
             data,
             state: VecUnravelState::Writing,
         }

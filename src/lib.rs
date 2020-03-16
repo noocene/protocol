@@ -4,14 +4,14 @@
 extern crate alloc;
 
 use core::{
+    borrow::BorrowMut,
     future as cfuture,
     pin::Pin,
     task::{Context, Poll},
 };
-use futures::ready;
 mod arrays;
 pub mod future;
-pub use future::Future;
+pub use future::{Future, FutureExt};
 mod option;
 mod primitives;
 mod result;
@@ -21,9 +21,10 @@ mod tuples;
 pub mod allocated;
 
 pub trait Unravel<C: ?Sized> {
-    type Future: Future<C, Ok = ()>;
+    type Finalize: Future<C, Ok = (), Error = <Self::Target as Future<C>>::Error>;
+    type Target: Future<C, Ok = Self::Finalize>;
 
-    fn unravel(self) -> Self::Future;
+    fn unravel(self) -> Self::Target;
 }
 
 pub trait Coalesce<C: ?Sized>: Sized {
@@ -37,7 +38,8 @@ pub trait Dispatch<P> {
 }
 
 pub trait Fork<P>: Dispatch<P> {
-    type Target: Future<Self, Ok = ()>;
+    type Finalize: Future<Self, Ok = (), Error = <Self::Target as Future<Self>>::Error>;
+    type Target: Future<Self, Ok = Self::Finalize>;
     type Future: Future<Self, Ok = (Self::Target, Self::Handle)>;
 
     fn fork(&mut self, item: P) -> Self::Future;
@@ -49,7 +51,25 @@ pub trait Join<P>: Dispatch<P> {
     fn join(&mut self, handle: Self::Handle) -> Self::Future;
 }
 
-pub trait CoalesceContextualizer {
+pub trait UnravelContext<C: ?Sized> {
+    type Target;
+    type Reference: BorrowMut<Self::Target>;
+
+    fn with<R: BorrowMut<C>>(&mut self, ctx: R) -> Self::Reference;
+}
+
+pub trait ContextualizeUnravel: Contextualizer {
+    type Context: UnravelContext<Self>;
+    type Output: Future<Self, Ok = (Self::Context, Self::Handle)>;
+
+    fn contextualize(&mut self) -> Self::Output;
+}
+
+pub trait Contextualizer {
+    type Handle;
+}
+
+pub trait CoalesceContextualizer: Contextualizer {
     type Target;
 }
 
@@ -57,7 +77,7 @@ pub trait ContextualizeCoalesce<F: Future<Self::Target>>: CoalesceContextualizer
     type Future: cfuture::Future<Output = Result<F::Ok, F::Error>>;
     type Output: Future<Self, Ok = Self::Future>;
 
-    fn contextualize(&mut self, future: F) -> Self::Output;
+    fn contextualize(&mut self, handle: Self::Handle, future: F) -> Self::Output;
 }
 
 pub trait Write<T> {

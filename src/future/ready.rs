@@ -1,18 +1,22 @@
 use super::Future;
 use core::{
     borrow::BorrowMut,
+    marker::PhantomData,
     pin::Pin,
     task::{Context, Poll},
 };
 use void::Void;
 
-pub struct Ready<T> {
+pub struct Ready<T, E = Void> {
     data: Option<T>,
+    error: PhantomData<E>,
 }
 
-impl<C: ?Sized, T: Unpin> Future<C> for Ready<T> {
+impl<T: Unpin, E> Unpin for Ready<T, E> {}
+
+impl<C: ?Sized, T: Unpin, E> Future<C> for Ready<T, E> {
     type Ok = T;
-    type Error = Void;
+    type Error = E;
 
     fn poll<R: BorrowMut<C>>(
         mut self: Pin<&mut Self>,
@@ -23,6 +27,9 @@ impl<C: ?Sized, T: Unpin> Future<C> for Ready<T> {
     }
 }
 
-pub fn ready<T>(data: T) -> Ready<T> {
-    Ready { data: Some(data) }
+pub fn ready<T, E>(data: T) -> Ready<T, E> {
+    Ready {
+        data: Some(data),
+        error: PhantomData,
+    }
 }

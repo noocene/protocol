@@ -1,4 +1,7 @@
-use crate::{ready, Coalesce, Dispatch, Fork, Future, Join, Read, Unravel, Write};
+use crate::{
+    future::{ready, Either, FutureExt, MapErr, Ready},
+    Coalesce, Dispatch, Fork, Future, Join, Read, Unravel, Write,
+};
 use core::{
     borrow::BorrowMut,
     mem::replace,
@@ -6,6 +9,7 @@ use core::{
     task::{Context, Poll},
 };
 use core_error::Error;
+use futures::ready;
 use thiserror::Error;
 
 pub enum OptionUnravel<
@@ -20,6 +24,13 @@ pub enum OptionUnravel<
     Flush(Option<C::Target>),
     Done,
 }
+
+type UnravelError<C, T> = OptionUnravelError<
+    <C as Write<Option<<C as Dispatch<T>>::Handle>>>::Error,
+    <<C as Fork<T>>::Future as Future<C>>::Error,
+    <<C as Fork<T>>::Target as Future<C>>::Error,
+    <<C as Fork<T>>::Finalize as Future<C>>::Error,
+>;
 
 pub enum OptionCoalesce<
     T: Unpin,
@@ -47,15 +58,18 @@ impl<T: Unpin, C: ?Sized + Write<Option<<C as Dispatch<T>>::Handle>> + Fork<T> +
     where
         T: Error + 'static,
         U: Error + 'static,
-        V: Error + 'static
+        V: Error + 'static,
+        W: Error + 'static
 )]
-pub enum OptionUnravelError<T, U, V> {
+pub enum OptionUnravelError<T, U, V, W> {
     #[error("failed to write handle for Option: {0}")]
     Transport(#[source] T),
     #[error("failed to fork Some variant of Option: {0}")]
     Dispatch(#[source] U),
-    #[error("failed to finalize Some variant of Option: {0}")]
+    #[error("failed to target Some variant of Option: {0}")]
     Target(#[source] V),
+    #[error("failed to finalize Some variant of Option: {0}")]
+    Finalize(#[source] W),
 }
 
 #[derive(Debug, Error)]
@@ -77,13 +91,13 @@ where
     C::Future: Unpin,
     C::Target: Unpin,
     C::Handle: Unpin,
+    C::Finalize: Unpin,
 {
-    type Ok = ();
-    type Error = OptionUnravelError<
-        C::Error,
-        <C::Future as Future<C>>::Error,
-        <C::Target as Future<C>>::Error,
+    type Ok = Either<
+        MapErr<C::Finalize, fn(<C::Finalize as Future<C>>::Error) -> UnravelError<C, T>>,
+        Ready<(), UnravelError<C, T>>,
     >;
+    type Error = UnravelError<C, T>;
 
     fn poll<R: BorrowMut<C>>(
         mut self: Pin<&mut Self>,
@@ -136,17 +150,19 @@ where
                             replace(this, OptionUnravel::Target(target));
                         } else {
                             replace(this, OptionUnravel::Done);
-                            return Poll::Ready(Ok(()));
+                            return Poll::Ready(Ok(FutureExt::<C>::into_right(ready(()))));
                         }
                     } else {
                         panic!("invalid state in OptionUnravel Write")
                     }
                 }
                 OptionUnravel::Target(future) => {
-                    ready!(Pin::new(&mut *future).poll(cx, &mut *ctx))
+                    let finalize = ready!(Pin::new(&mut *future).poll(cx, &mut *ctx))
                         .map_err(OptionUnravelError::Target)?;
                     replace(this, OptionUnravel::Done);
-                    return Poll::Ready(Ok(()));
+                    return Poll::Ready(Ok(FutureExt::<C>::into_left(
+                        finalize.map_err(OptionUnravelError::Finalize),
+                    )));
                 }
                 OptionUnravel::Done => panic!("OptionUnravel polled after completion"),
             }
@@ -204,10 +220,15 @@ where
     C::Future: Unpin,
     C::Target: Unpin,
     C::Handle: Unpin,
+    C::Finalize: Unpin,
 {
-    type Future = OptionUnravel<T, C>;
+    type Finalize = Either<
+        MapErr<C::Finalize, fn(<C::Finalize as Future<C>>::Error) -> UnravelError<C, T>>,
+        Ready<(), UnravelError<C, T>>,
+    >;
+    type Target = OptionUnravel<T, C>;
 
-    fn unravel(self) -> Self::Future {
+    fn unravel(self) -> Self::Target {
         self.into()
     }
 }
