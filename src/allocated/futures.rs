@@ -251,8 +251,7 @@ where
     ) -> Poll<Result<Self::Ok, Self::Error>> {
         let this = &mut *self;
 
-        let mut target = this.context.with(ctx);
-        let ctx = target.borrow_mut();
+        let ctx = this.context.with(ctx);
 
         loop {
             match &mut this.state {

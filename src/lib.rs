@@ -53,9 +53,8 @@ pub trait Join<P>: Dispatch<P> {
 
 pub trait UnravelContext<C: ?Sized> {
     type Target;
-    type Reference: BorrowMut<Self::Target>;
 
-    fn with<R: BorrowMut<C>>(&mut self, ctx: R) -> Self::Reference;
+    fn with<'a, 'b: 'a, R: BorrowMut<C> + 'b>(&'a mut self, ctx: R) -> &'a mut Self::Target;
 }
 
 pub trait ContextualizeUnravel: Contextualizer {
