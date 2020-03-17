@@ -19,6 +19,8 @@ mod tuples;
 
 #[cfg(feature = "alloc")]
 pub mod allocated;
+#[cfg(feature = "alloc")]
+pub use allocated::ProtocolError;
 
 pub trait Unravel<C: ?Sized> {
     type Finalize: Future<C, Ok = (), Error = <Self::Target as Future<C>>::Error>;
