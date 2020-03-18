@@ -40,35 +40,14 @@ impl Error for ErasedError {
     }
 }
 
-struct ErrorWrapper<T: ?Sized + Error + 'static>(Box<T>);
-
-impl<T: ?Sized + Error + 'static> Display for ErrorWrapper<T> {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl<T: ?Sized + Error + 'static> Debug for ErrorWrapper<T> {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl<T: ?Sized + Error + 'static> Error for ErrorWrapper<T> {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        self.0.source()
-    }
-}
-
-fn into_data<T: ?Sized + Error + 'static>(error: Box<T>) -> ErrorData {
+fn into_data<T: ?Sized + Error + 'static>(initial: Box<T>) -> ErrorData {
     let mut data = vec![];
-    let wrapped = ErrorWrapper(error);
-    let mut error = Some(&wrapped as &(dyn Error + 'static));
+    let mut error = initial.source();
     while let Some(e) = error {
         data.push([format!("{}", e), format!("{:?}", e)]);
         error = e.source();
     }
-    ([format!("{}", wrapped), format!("{:?}", wrapped)], data)
+    ([format!("{}", initial), format!("{:?}", initial)], data)
 }
 
 fn from_data(initial: ErrorData) -> ErasedError {
