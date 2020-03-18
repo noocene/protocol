@@ -14,4 +14,4 @@ thiserror = { git = "https://github.com/noocene/thiserror", default-features = f
 [features]
 default = ["std", "alloc"]
 alloc = ["core-error/alloc"]
-std = ["alloc", "core-error/std", "core-error/std"]
+std = ["alloc", "core-error/std", "core-error/std", "void/std"]
