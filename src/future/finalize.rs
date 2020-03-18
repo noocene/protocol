@@ -441,6 +441,7 @@ macro_rules! tuple_impls {
                             $($n => {
                                 if let Some(future) = self.futures.0.data.$n.as_mut() {
                                     let finalize = ready!(Pin::new(future).poll(cx, ctx.borrow_mut())).map_err($error::$name)?;
+                                    self.futures.0.index += 1;
                                     (self.futures.1).$n = Some(finalize);
                                 } else {
                                     self.futures.0.index += 1;
