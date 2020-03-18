@@ -1014,8 +1014,10 @@ where
                     replace(this, Tuple1Coalesce::Join(ctx.join(handle)));
                 }
                 Tuple1Coalesce::Join(future) => {
-                    return Poll::Ready(Ok((ready!(Pin::new(future).poll(cx, &mut *ctx))
-                        .map_err(Tuple1CoalesceError::Dispatch)?,)));
+                    let item = ready!(Pin::new(future).poll(cx, &mut *ctx))
+                        .map_err(Tuple1CoalesceError::Dispatch)?;
+                    replace(this, Tuple1Coalesce::Done);
+                    return Poll::Ready(Ok((item,)));
                 }
                 Tuple1Coalesce::Done => panic!("Tuple1Unravel polled after completion"),
             }

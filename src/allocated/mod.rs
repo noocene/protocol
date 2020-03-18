@@ -1,3 +1,4 @@
+mod errors;
 mod futures;
 mod vec;
 use alloc::boxed::Box;
