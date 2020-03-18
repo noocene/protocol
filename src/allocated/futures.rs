@@ -1,4 +1,4 @@
-use super::{FromError, ProtocolError};
+use super::{Flatten, FromError, ProtocolError};
 use crate::{
     Coalesce, CoalesceContextualizer, ContextualizeCoalesce, ContextualizeUnravel, Contextualizer,
     Dispatch, Fork, Future, Join, Read, Unravel, UnravelContext, Write,
@@ -13,7 +13,10 @@ use core::{
     task::{Context, Poll},
 };
 use core_error::Error;
-use futures::{ready, TryFutureExt};
+use futures::{
+    future::{ready, Either},
+    ready, FutureExt, TryFutureExt,
+};
 use thiserror::Error;
 
 pub enum FutureCoalesceState<T> {
@@ -481,6 +484,25 @@ macro_rules! marker_variants {
                         future: Some(self),
                         context: FutureUnravelState::None(PhantomData)
                     }
+                }
+            }
+
+            impl<
+                    'a,
+                    E,
+                    T: future::Future<Output = Result<Self, E>> + 'a $(+ $marker)*,
+                    U: FromError<E> $(+ $marker)*,
+                > Flatten<E, T> for Pin<Box<dyn future::Future<Output = U> + 'a $(+ $marker)*>>
+            {
+                fn flatten(future: T) -> Self {
+                    Box::pin(
+                        future
+                            .map(|out| match out {
+                                Err(e) => Either::Left(ready(U::from_error(e))),
+                                Ok(item) => Either::Right(item),
+                            })
+                            .flatten(),
+                    )
                 }
             }
         )*

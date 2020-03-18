@@ -1,7 +1,10 @@
 mod futures;
 mod vec;
 use alloc::boxed::Box;
-use core::fmt::{self, Debug, Formatter};
+use core::{
+    fmt::{self, Debug, Formatter},
+    future::Future,
+};
 use core_error::Error;
 use thiserror::Error;
 
@@ -23,4 +26,8 @@ impl<T, S, E: From<S>> FromError<S> for Result<T, E> {
     fn from_error(error: S) -> Self {
         Err(error.into())
     }
+}
+
+pub trait Flatten<E, F: Future<Output = Result<Self, E>>>: Sized {
+    fn flatten(future: F) -> Self;
 }
