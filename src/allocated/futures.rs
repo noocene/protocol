@@ -1,7 +1,7 @@
 use super::{Flatten, FromError, ProtocolError};
 use crate::{
-    Coalesce, CoalesceContextualizer, ContextualizeCoalesce, ContextualizeUnravel, Contextualizer,
-    Dispatch, Fork, Future, Join, Notify, Read, Unravel, UnravelContext, Write,
+    Coalesce, ContextualizeCoalesce, ContextualizeUnravel, Contextualizer, Dispatch, Fork, Future,
+    Join, Notify, Read, Unravel, UnravelContext, Write,
 };
 use alloc::boxed::Box;
 use core::{
@@ -28,22 +28,18 @@ pub enum FutureCoalesceState<T> {
 pub struct FutureCoalesce<
     'a,
     O,
-    P: Fn(
-        <C as ContextualizeCoalesce<
-            ErasedFutureCoalesce<T, <C as CoalesceContextualizer>::Target>,
-        >>::Future,
-    ) -> O,
+    P: Fn(ErasedFutureCoalesce<T, C::Context>) -> O,
     T: Unpin,
-    C: ?Sized + ContextualizeCoalesce<ErasedFutureCoalesce<T, <C as CoalesceContextualizer>::Target>>,
+    C: ?Sized + ContextualizeCoalesce,
 > where
-    C::Target: Unpin
-        + Read<<C::Target as Dispatch<<C::Target as Notify<T>>::Notification>>::Handle>
+    C::Context: Unpin
+        + Read<<C::Context as Dispatch<<C::Context as Notify<T>>::Notification>>::Handle>
         + Notify<T>,
-    <C::Target as Join<<C::Target as Notify<T>>::Notification>>::Future: Unpin,
-    <C::Target as Notify<T>>::Unwrap: Unpin,
+    <C::Context as Join<<C::Context as Notify<T>>::Notification>>::Future: Unpin,
+    <C::Context as Notify<T>>::Unwrap: Unpin,
 {
     conv: P,
-    lifetime: PhantomData<&'a ()>,
+    lifetime: PhantomData<&'a (O, T)>,
     state: FutureCoalesceState<C::Output>,
 }
 
@@ -378,11 +374,16 @@ where
     }
 }
 
-pub enum ErasedFutureCoalesce<T, C: ?Sized + Notify<T>> {
+pub enum ErasedFutureCoalesceState<T, C: Notify<T>> {
     Read,
     Join(<C as Join<<C as Notify<T>>::Notification>>::Future),
     Unwrap(<C as Notify<T>>::Unwrap),
     Done,
+}
+
+pub struct ErasedFutureCoalesce<T, C: Notify<T>> {
+    state: ErasedFutureCoalesceState<T, C>,
+    context: C,
 }
 
 #[derive(Debug, Error)]
@@ -414,51 +415,46 @@ pub enum FutureCoalesceError<E, T> {
     Contextualize(E),
 }
 
-impl<
-        C: Unpin + ?Sized + Notify<T> + Read<<C as Dispatch<<C as Notify<T>>::Notification>>::Handle>,
-        T,
-    > Future<C> for ErasedFutureCoalesce<T, C>
+impl<C: Unpin + Notify<T> + Read<<C as Dispatch<<C as Notify<T>>::Notification>>::Handle>, T>
+    future::Future for ErasedFutureCoalesce<T, C>
 where
     <C as Join<<C as Notify<T>>::Notification>>::Future: Unpin,
     C::Unwrap: Unpin,
 {
-    type Ok = T;
-    type Error = ErasedFutureCoalesceError<
-        C::Error,
-        <<C as Join<<C as Notify<T>>::Notification>>::Future as Future<C>>::Error,
-        <<C as Notify<T>>::Unwrap as Future<C>>::Error,
+    type Output = Result<
+        T,
+        ErasedFutureCoalesceError<
+            C::Error,
+            <<C as Join<<C as Notify<T>>::Notification>>::Future as Future<C>>::Error,
+            <<C as Notify<T>>::Unwrap as Future<C>>::Error,
+        >,
     >;
 
-    fn poll<R: BorrowMut<C>>(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context,
-        mut ctx: R,
-    ) -> Poll<Result<Self::Ok, Self::Error>> {
-        let ctx = ctx.borrow_mut();
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        let this = &mut *self;
+
+        let ctx = this.context.borrow_mut();
 
         loop {
-            match &mut *self {
-                ErasedFutureCoalesce::Read => {
+            match &mut this.state {
+                ErasedFutureCoalesceState::Read => {
                     let mut ctx = Pin::new(&mut *ctx);
                     let handle = ready!(ctx.as_mut().read(cx))
                         .map_err(ErasedFutureCoalesceError::Transport)?;
-                    replace(&mut *self, ErasedFutureCoalesce::Join(ctx.join(handle)));
+                    this.state = ErasedFutureCoalesceState::Join(ctx.join(handle));
                 }
-                ErasedFutureCoalesce::Unwrap(future) => {
+                ErasedFutureCoalesceState::Unwrap(future) => {
                     let item = ready!(Pin::new(future).poll(cx, &mut *ctx))
                         .map_err(ErasedFutureCoalesceError::Notify)?;
-                    replace(&mut *self, ErasedFutureCoalesce::Done);
+                    this.state = ErasedFutureCoalesceState::Done;
                     return Poll::Ready(Ok(item));
                 }
-                ErasedFutureCoalesce::Join(future) => {
+                ErasedFutureCoalesceState::Join(future) => {
                     let notification = ready!(Pin::new(future).poll(cx, &mut *ctx))
                         .map_err(ErasedFutureCoalesceError::Dispatch)?;
-                    replace(
-                        &mut *self,
-                        ErasedFutureCoalesce::Unwrap(ctx.unwrap(notification)),
-                    );
+                    this.state = ErasedFutureCoalesceState::Unwrap(ctx.unwrap(notification));
                 }
-                ErasedFutureCoalesce::Done => panic!("FutureUnravel polled after completion"),
+                ErasedFutureCoalesceState::Done => panic!("FutureUnravel polled after completion"),
             }
         }
     }
@@ -467,22 +463,20 @@ where
 impl<
         'a,
         O,
-        P: Fn(C::Future) -> O,
+        P: Fn(ErasedFutureCoalesce<T, C::Context>) -> O,
         T: Unpin,
-        C: ?Sized
-            + Read<<C as Contextualizer>::Handle>
-            + ContextualizeCoalesce<ErasedFutureCoalesce<T, <C as CoalesceContextualizer>::Target>>,
+        C: ?Sized + Read<<C as Contextualizer>::Handle> + ContextualizeCoalesce,
     > Future<C> for FutureCoalesce<'a, O, P, T, C>
 where
     C::Output: Unpin,
     C: Unpin,
+    C::Context: Unpin,
     P: Unpin,
-    <C::Target as Notify<T>>::Unwrap: Unpin,
-    C::Future: 'a,
-    C::Target: Unpin
-        + Read<<C::Target as Dispatch<<C::Target as Notify<T>>::Notification>>::Handle>
+    <C::Context as Notify<T>>::Unwrap: Unpin,
+    C::Context: Unpin
+        + Read<<C::Context as Dispatch<<C::Context as Notify<T>>::Notification>>::Handle>
         + Notify<T>,
-    <C::Target as Join<<C::Target as Notify<T>>::Notification>>::Future: Unpin,
+    <C::Context as Join<<C::Context as Notify<T>>::Notification>>::Future: Unpin,
 {
     type Ok = O;
     type Error = FutureCoalesceError<<C::Output as Future<C>>::Error, C::Error>;
@@ -504,15 +498,16 @@ where
                 FutureCoalesceState::Read => {
                     let ct = Pin::new(&mut *ctx);
                     let handle = ready!(ct.read(cx)).map_err(FutureCoalesceError::Read)?;
-                    this.state = FutureCoalesceState::Contextualize(
-                        ctx.contextualize(handle, ErasedFutureCoalesce::Read),
-                    );
+                    this.state = FutureCoalesceState::Contextualize(ctx.contextualize(handle));
                 }
                 FutureCoalesceState::Contextualize(future) => {
-                    let item = ready!(Pin::new(future).poll(cx, &mut *ctx))
+                    let context = ready!(Pin::new(future).poll(cx, &mut *ctx))
                         .map_err(FutureCoalesceError::Contextualize)?;
                     replace(&mut this.state, FutureCoalesceState::Done);
-                    return Poll::Ready(Ok((this.conv)(item)));
+                    return Poll::Ready(Ok((this.conv)(ErasedFutureCoalesce {
+                        context,
+                        state: ErasedFutureCoalesceState::Read,
+                    })));
                 }
                 FutureCoalesceState::Done => panic!("FutureCoalesce polled after completion"),
             }
@@ -525,32 +520,30 @@ macro_rules! marker_variants {
         $($marker:ident)*
     ),+) => {
         $(
-            impl<'a, T: Unpin + FromError<ProtocolError>, C: Read<<C as Contextualizer>::Handle> + ContextualizeCoalesce<ErasedFutureCoalesce<T, <C as CoalesceContextualizer>::Target>>> Coalesce<C> for Pin<Box<dyn future::Future<Output = T> + 'a $(+ $marker)*>>
+            impl<'a, T: Unpin + FromError<ProtocolError> + 'a, C: Read<<C as Contextualizer>::Handle> + ContextualizeCoalesce + 'a $(+ $marker)*> Coalesce<C> for Pin<Box<dyn future::Future<Output = T> + 'a $(+ $marker)*>>
             where
                 C::Output: Unpin,
                 C: Unpin,
-                C::Future: 'a $(+ $marker)*,
-                C::Target: Unpin + Read<<C::Target as Dispatch<<C::Target as Notify<T>>::Notification>>::Handle> + Notify<T>,
-                <C::Target as Join<<C::Target as Notify<T>>::Notification>>::Future: Unpin,
-                <C::Target as Notify<T>>::Unwrap: Unpin,
-                <C::Target as Read<<C::Target as Dispatch<<C::Target as Notify<T>>::Notification>>::Handle>>::Error: Error + 'static,
-                <<C::Target as Join<<C::Target as Notify<T>>::Notification>>::Future as Future<C::Target>>::Error: Error + 'static,
-                <<C::Target as Notify<T>>::Unwrap as Future<C::Target>>::Error: Error + 'static
+                C::Context: Unpin + Read<<C::Context as Dispatch<<C::Context as Notify<T>>::Notification>>::Handle> + Notify<T> + 'a $(+ $marker)*,
+                <C::Context as Join<<C::Context as Notify<T>>::Notification>>::Future: Unpin + 'a $(+ $marker)*,
+                <C::Context as Notify<T>>::Unwrap: Unpin + 'a $(+ $marker)*,
+                <C::Context as Read<<C::Context as Dispatch<<C::Context as Notify<T>>::Notification>>::Handle>>::Error: Error + 'static,
+                <<C::Context as Join<<C::Context as Notify<T>>::Notification>>::Future as Future<C::Context>>::Error: Error + 'static,
+                <<C::Context as Notify<T>>::Unwrap as Future<C::Context>>::Error: Error + 'static
             {
-                type Future = FutureCoalesce<'a, Self, fn(C::Future) -> Self, T, C>;
+                type Future = FutureCoalesce<'a, Self, fn(ErasedFutureCoalesce<T, C::Context>) -> Self, T, C>;
 
                 fn coalesce() -> Self::Future {
-                    fn conv<'a, T: Unpin + FromError<ProtocolError>, C: ContextualizeCoalesce<ErasedFutureCoalesce<T, <C as CoalesceContextualizer>::Target>>>(
-                        fut: C::Future,
+                    fn conv<'a, T: Unpin + FromError<ProtocolError> + 'a, C: ContextualizeCoalesce + 'a $(+ $marker)*>(
+                        fut: ErasedFutureCoalesce<T, C::Context>,
                     ) -> Pin<Box<dyn future::Future<Output = T> + 'a $(+ $marker)*>>
                     where
-                        C::Future: 'a $(+ $marker)*,
-                        C::Target: Unpin + Read<<C::Target as Dispatch<<C::Target as Notify<T>>::Notification>>::Handle> + Notify<T>,
-                        <C::Target as Join<<C::Target as Notify<T>>::Notification>>::Future: Unpin,
-                        <C::Target as Notify<T>>::Unwrap: Unpin,
-                        <C::Target as Read<<C::Target as Dispatch<<C::Target as Notify<T>>::Notification>>::Handle>>::Error: Error + 'static,
-                        <<C::Target as Join<<C::Target as Notify<T>>::Notification>>::Future as Future<C::Target>>::Error: Error + 'static,
-                        <<C::Target as Notify<T>>::Unwrap as Future<C::Target>>::Error: Error + 'static
+                        C::Context: Unpin + Read<<C::Context as Dispatch<<C::Context as Notify<T>>::Notification>>::Handle> + Notify<T> + 'a $(+ $marker)*,
+                        <C::Context as Join<<C::Context as Notify<T>>::Notification>>::Future: Unpin + 'a $(+ $marker)*,
+                        <C::Context as Notify<T>>::Unwrap: Unpin + 'a $(+ $marker)*,
+                        <C::Context as Read<<C::Context as Dispatch<<C::Context as Notify<T>>::Notification>>::Handle>>::Error: Error + 'static,
+                        <<C::Context as Join<<C::Context as Notify<T>>::Notification>>::Future as Future<C::Context>>::Error: Error + 'static,
+                        <<C::Context as Notify<T>>::Unwrap as Future<C::Context>>::Error: Error + 'static
                     {
                         Box::pin(fut.unwrap_or_else(|e| T::from_error(ProtocolError(Box::new(e)))))
                     }

@@ -5,7 +5,6 @@ extern crate alloc;
 
 use core::{
     borrow::BorrowMut,
-    future as cfuture,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -85,11 +84,11 @@ pub trait CoalesceContextualizer: Contextualizer {
     type Target;
 }
 
-pub trait ContextualizeCoalesce<F: Future<Self::Target>>: CoalesceContextualizer {
-    type Future: cfuture::Future<Output = Result<F::Ok, F::Error>>;
-    type Output: Future<Self, Ok = Self::Future>;
+pub trait ContextualizeCoalesce: CoalesceContextualizer {
+    type Context;
+    type Output: Future<Self, Ok = Self::Context>;
 
-    fn contextualize(&mut self, handle: Self::Handle, future: F) -> Self::Output;
+    fn contextualize(&mut self, handle: Self::Handle) -> Self::Output;
 }
 
 pub trait Write<T> {
