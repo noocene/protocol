@@ -22,6 +22,17 @@ pub mod allocated;
 #[cfg(feature = "alloc")]
 pub use allocated::ProtocolError;
 
+pub trait Notify<T>:
+    Fork<<Self as Notify<T>>::Notification> + Join<<Self as Notify<T>>::Notification>
+{
+    type Notification;
+    type Wrap: Future<Self, Ok = Self::Notification>;
+    type Unwrap: Future<Self, Ok = T>;
+
+    fn wrap(&mut self, item: T) -> Self::Wrap;
+    fn unwrap(&mut self, notifiaction: Self::Notification) -> Self::Unwrap;
+}
+
 pub trait Unravel<C: ?Sized> {
     type Finalize: Future<C, Ok = (), Error = <Self::Target as Future<C>>::Error>;
     type Target: Future<C, Ok = Self::Finalize>;

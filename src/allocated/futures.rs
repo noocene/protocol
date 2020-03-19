@@ -1,7 +1,7 @@
 use super::{Flatten, FromError, ProtocolError};
 use crate::{
     Coalesce, CoalesceContextualizer, ContextualizeCoalesce, ContextualizeUnravel, Contextualizer,
-    Dispatch, Fork, Future, Join, Read, Unravel, UnravelContext, Write,
+    Dispatch, Fork, Future, Join, Notify, Read, Unravel, UnravelContext, Write,
 };
 use alloc::boxed::Box;
 use core::{
@@ -36,8 +36,11 @@ pub struct FutureCoalesce<
     T: Unpin,
     C: ?Sized + ContextualizeCoalesce<ErasedFutureCoalesce<T, <C as CoalesceContextualizer>::Target>>,
 > where
-    C::Target: Unpin + Read<<C::Target as Dispatch<T>>::Handle> + Join<T>,
-    <C::Target as Join<T>>::Future: Unpin,
+    C::Target: Unpin
+        + Read<<C::Target as Dispatch<<C::Target as Notify<T>>::Notification>>::Handle>
+        + Notify<T>,
+    <C::Target as Join<<C::Target as Notify<T>>::Notification>>::Future: Unpin,
+    <C::Target as Notify<T>>::Unwrap: Unpin,
 {
     conv: P,
     lifetime: PhantomData<&'a ()>,
@@ -48,8 +51,11 @@ enum FutureUnravelState<
     T,
     C: ?Sized + Write<<C as Contextualizer>::Handle> + ContextualizeUnravel + Unpin,
 > where
-    <C::Context as UnravelContext<C>>::Target:
-        Write<<<C::Context as UnravelContext<C>>::Target as Dispatch<T>>::Handle> + Fork<T>,
+    <C::Context as UnravelContext<C>>::Target: Write<
+            <<C::Context as UnravelContext<C>>::Target as Dispatch<
+                <<C::Context as UnravelContext<C>>::Target as Notify<T>>::Notification,
+            >>::Handle,
+        > + Notify<T>,
 {
     None(PhantomData<T>),
     Context(C::Output),
@@ -61,8 +67,11 @@ pub struct FutureUnravel<
     T: future::Future,
     C: ?Sized + Write<<C as Contextualizer>::Handle> + ContextualizeUnravel + Unpin,
 > where
-    <C::Context as UnravelContext<C>>::Target: Write<<<C::Context as UnravelContext<C>>::Target as Dispatch<T::Output>>::Handle>
-        + Fork<T::Output>,
+    <C::Context as UnravelContext<C>>::Target: Write<
+            <<C::Context as UnravelContext<C>>::Target as Dispatch<
+                <<C::Context as UnravelContext<C>>::Target as Notify<T::Output>>::Notification,
+            >>::Handle,
+        > + Notify<T::Output>,
 {
     future: Option<T>,
     context: FutureUnravelState<T::Output, C>,
@@ -70,25 +79,52 @@ pub struct FutureUnravel<
 
 pub enum ErasedFutureUnravelState<T: future::Future, C: ?Sized + ContextualizeUnravel + Unpin>
 where
-    <C::Context as UnravelContext<C>>::Target: Write<<<C::Context as UnravelContext<C>>::Target as Dispatch<T::Output>>::Handle>
-        + Fork<T::Output>,
+    <C::Context as UnravelContext<C>>::Target: Write<
+            <<C::Context as UnravelContext<C>>::Target as Dispatch<
+                <<C::Context as UnravelContext<C>>::Target as Notify<T::Output>>::Notification,
+            >>::Handle,
+        > + Notify<T::Output>,
 {
     Future(T),
-    Fork(<<C::Context as UnravelContext<C>>::Target as Fork<T::Output>>::Future),
-    Write(
-        <<C::Context as UnravelContext<C>>::Target as Dispatch<T::Output>>::Handle,
-        <<C::Context as UnravelContext<C>>::Target as Fork<T::Output>>::Target,
+    Wrap(<<C::Context as UnravelContext<C>>::Target as Notify<T::Output>>::Wrap),
+    Fork(
+        <<C::Context as UnravelContext<C>>::Target as Fork<
+            <<C::Context as UnravelContext<C>>::Target as Notify<T::Output>>::Notification,
+        >>::Future,
     ),
-    Flush(<<C::Context as UnravelContext<C>>::Target as Fork<T::Output>>::Target),
-    Target(<<C::Context as UnravelContext<C>>::Target as Fork<T::Output>>::Target),
-    Finalize(<<C::Context as UnravelContext<C>>::Target as Fork<T::Output>>::Finalize),
+    Write(
+        <<C::Context as UnravelContext<C>>::Target as Dispatch<
+            <<C::Context as UnravelContext<C>>::Target as Notify<T::Output>>::Notification,
+        >>::Handle,
+        <<C::Context as UnravelContext<C>>::Target as Fork<
+            <<C::Context as UnravelContext<C>>::Target as Notify<T::Output>>::Notification,
+        >>::Target,
+    ),
+    Flush(
+        <<C::Context as UnravelContext<C>>::Target as Fork<
+            <<C::Context as UnravelContext<C>>::Target as Notify<T::Output>>::Notification,
+        >>::Target,
+    ),
+    Target(
+        <<C::Context as UnravelContext<C>>::Target as Fork<
+            <<C::Context as UnravelContext<C>>::Target as Notify<T::Output>>::Notification,
+        >>::Target,
+    ),
+    Finalize(
+        <<C::Context as UnravelContext<C>>::Target as Fork<
+            <<C::Context as UnravelContext<C>>::Target as Notify<T::Output>>::Notification,
+        >>::Finalize,
+    ),
     Done,
 }
 
 pub struct ErasedFutureUnravel<T: future::Future, C: ?Sized + ContextualizeUnravel + Unpin>
 where
-    <C::Context as UnravelContext<C>>::Target: Write<<<C::Context as UnravelContext<C>>::Target as Dispatch<T::Output>>::Handle>
-        + Fork<T::Output>,
+    <C::Context as UnravelContext<C>>::Target: Write<
+            <<C::Context as UnravelContext<C>>::Target as Dispatch<
+                <<C::Context as UnravelContext<C>>::Target as Notify<T::Output>>::Notification,
+            >>::Handle,
+        > + Notify<T::Output>,
 {
     state: ErasedFutureUnravelState<T, C>,
     context: C::Context,
@@ -98,19 +134,22 @@ where
 #[bounds(
     where
         T: Error + 'static,
+        I: Error + 'static,
         U: Error + 'static,
         V: Error + 'static,
         W: Error + 'static,
         Z: Error + 'static,
         K: Error + 'static,
 )]
-pub enum FutureUnravelError<Z, K, T, U, V, W> {
+pub enum FutureUnravelError<Z, K, T, I, U, V, W> {
     #[error("failed to contextualize erased future: {0}")]
     Contextualize(#[source] Z),
     #[error("failed to write context handle for erased future: {0}")]
     Write(#[source] K),
     #[error("failed to write handle for erased future: {0}")]
     Transport(#[source] T),
+    #[error("failed to create notification wrapper for erased future content: {0}")]
+    Notify(#[source] I),
     #[error("failed to fork erased future content: {0}")]
     Dispatch(#[source] U),
     #[error("failed to target erased future content: {0}")]
@@ -124,16 +163,22 @@ impl<
         C: ?Sized + Write<<C as Contextualizer>::Handle> + ContextualizeUnravel + Unpin,
     > Unpin for FutureUnravel<T, C>
 where
-    <C::Context as UnravelContext<C>>::Target: Write<<<C::Context as UnravelContext<C>>::Target as Dispatch<T::Output>>::Handle>
-        + Fork<T::Output>,
+    <C::Context as UnravelContext<C>>::Target: Write<
+            <<C::Context as UnravelContext<C>>::Target as Dispatch<
+                <<C::Context as UnravelContext<C>>::Target as Notify<T::Output>>::Notification,
+            >>::Handle,
+        > + Notify<T::Output>,
 {
 }
 
 impl<T: future::Future, C: ?Sized + ContextualizeUnravel + Unpin> Unpin
     for ErasedFutureUnravel<T, C>
 where
-    <C::Context as UnravelContext<C>>::Target: Write<<<C::Context as UnravelContext<C>>::Target as Dispatch<T::Output>>::Handle>
-        + Fork<T::Output>,
+    <C::Context as UnravelContext<C>>::Target: Write<
+            <<C::Context as UnravelContext<C>>::Target as Dispatch<
+                <<C::Context as UnravelContext<C>>::Target as Notify<T::Output>>::Notification,
+            >>::Handle,
+        > + Notify<T::Output>,
 {
 }
 
@@ -142,8 +187,11 @@ impl<
         C: ?Sized + Write<<C as Contextualizer>::Handle> + ContextualizeUnravel + Unpin,
     > Future<C> for FutureUnravel<T, C>
 where
-    <C::Context as UnravelContext<C>>::Target: Write<<<C::Context as UnravelContext<C>>::Target as Dispatch<T::Output>>::Handle>
-        + Fork<T::Output>,
+    <C::Context as UnravelContext<C>>::Target: Write<
+            <<C::Context as UnravelContext<C>>::Target as Dispatch<
+                <<C::Context as UnravelContext<C>>::Target as Notify<T::Output>>::Notification,
+            >>::Handle,
+        > + Notify<T::Output>,
     C::Output: Unpin,
 {
     type Ok = ErasedFutureUnravel<T, C>;
@@ -151,17 +199,22 @@ where
         <C::Output as Future<C>>::Error,
         C::Error,
         <<C::Context as UnravelContext<C>>::Target as Write<
-            <<C::Context as UnravelContext<C>>::Target as Dispatch<T::Output>>::Handle,
+            <<C::Context as UnravelContext<C>>::Target as Dispatch<
+                <<C::Context as UnravelContext<C>>::Target as Notify<T::Output>>::Notification,
+            >>::Handle,
         >>::Error,
-        <<<C::Context as UnravelContext<C>>::Target as Fork<T::Output>>::Future as Future<
+        <<<C::Context as UnravelContext<C>>::Target as Notify<T::Output>>::Wrap as Future<
             <C::Context as UnravelContext<C>>::Target,
         >>::Error,
-        <<<C::Context as UnravelContext<C>>::Target as Fork<T::Output>>::Target as Future<
-            <C::Context as UnravelContext<C>>::Target,
-        >>::Error,
-        <<<C::Context as UnravelContext<C>>::Target as Fork<T::Output>>::Finalize as Future<
-            <C::Context as UnravelContext<C>>::Target,
-        >>::Error,
+        <<<C::Context as UnravelContext<C>>::Target as Fork<
+            <<C::Context as UnravelContext<C>>::Target as Notify<T::Output>>::Notification,
+        >>::Future as Future<<C::Context as UnravelContext<C>>::Target>>::Error,
+        <<<C::Context as UnravelContext<C>>::Target as Fork<
+            <<C::Context as UnravelContext<C>>::Target as Notify<T::Output>>::Notification,
+        >>::Target as Future<<C::Context as UnravelContext<C>>::Target>>::Error,
+        <<<C::Context as UnravelContext<C>>::Target as Fork<
+            <<C::Context as UnravelContext<C>>::Target as Notify<T::Output>>::Notification,
+        >>::Finalize as Future<<C::Context as UnravelContext<C>>::Target>>::Error,
     >;
     fn poll<R: BorrowMut<C>>(
         mut self: Pin<&mut Self>,
@@ -220,31 +273,46 @@ impl<
         C: ?Sized + ContextualizeUnravel + Write<<C as Contextualizer>::Handle> + Unpin,
     > Future<C> for ErasedFutureUnravel<T, C>
 where
-    <C::Context as UnravelContext<C>>::Target: Write<<<C::Context as UnravelContext<C>>::Target as Dispatch<T::Output>>::Handle>
-        + Fork<T::Output>,
+    <C::Context as UnravelContext<C>>::Target: Write<
+            <<C::Context as UnravelContext<C>>::Target as Dispatch<
+                <<C::Context as UnravelContext<C>>::Target as Notify<T::Output>>::Notification,
+            >>::Handle,
+        > + Notify<T::Output>,
     C::Output: Unpin,
-    <<C::Context as UnravelContext<C>>::Target as Fork<T::Output>>::Finalize: Unpin,
-    <<C::Context as UnravelContext<C>>::Target as Fork<T::Output>>::Future: Unpin,
+    <<C::Context as UnravelContext<C>>::Target as Fork<
+        <<C::Context as UnravelContext<C>>::Target as Notify<T::Output>>::Notification,
+    >>::Finalize: Unpin,
+    <<C::Context as UnravelContext<C>>::Target as Fork<
+        <<C::Context as UnravelContext<C>>::Target as Notify<T::Output>>::Notification,
+    >>::Future: Unpin,
     <C::Context as UnravelContext<C>>::Target: Unpin,
-    <<C::Context as UnravelContext<C>>::Target as Fork<T::Output>>::Target: Unpin,
+    <<C::Context as UnravelContext<C>>::Target as Fork<
+        <<C::Context as UnravelContext<C>>::Target as Notify<T::Output>>::Notification,
+    >>::Target: Unpin,
     T: Unpin,
+    <<C::Context as UnravelContext<C>>::Target as Notify<T::Output>>::Wrap: Unpin,
 {
     type Ok = ();
     type Error = FutureUnravelError<
         <C::Output as Future<C>>::Error,
         C::Error,
         <<C::Context as UnravelContext<C>>::Target as Write<
-            <<C::Context as UnravelContext<C>>::Target as Dispatch<T::Output>>::Handle,
+            <<C::Context as UnravelContext<C>>::Target as Dispatch<
+                <<C::Context as UnravelContext<C>>::Target as Notify<T::Output>>::Notification,
+            >>::Handle,
         >>::Error,
-        <<<C::Context as UnravelContext<C>>::Target as Fork<T::Output>>::Future as Future<
+        <<<C::Context as UnravelContext<C>>::Target as Notify<T::Output>>::Wrap as Future<
             <C::Context as UnravelContext<C>>::Target,
         >>::Error,
-        <<<C::Context as UnravelContext<C>>::Target as Fork<T::Output>>::Target as Future<
-            <C::Context as UnravelContext<C>>::Target,
-        >>::Error,
-        <<<C::Context as UnravelContext<C>>::Target as Fork<T::Output>>::Finalize as Future<
-            <C::Context as UnravelContext<C>>::Target,
-        >>::Error,
+        <<<C::Context as UnravelContext<C>>::Target as Fork<
+            <<C::Context as UnravelContext<C>>::Target as Notify<T::Output>>::Notification,
+        >>::Future as Future<<C::Context as UnravelContext<C>>::Target>>::Error,
+        <<<C::Context as UnravelContext<C>>::Target as Fork<
+            <<C::Context as UnravelContext<C>>::Target as Notify<T::Output>>::Notification,
+        >>::Target as Future<<C::Context as UnravelContext<C>>::Target>>::Error,
+        <<<C::Context as UnravelContext<C>>::Target as Fork<
+            <<C::Context as UnravelContext<C>>::Target as Notify<T::Output>>::Notification,
+        >>::Finalize as Future<<C::Context as UnravelContext<C>>::Target>>::Error,
     >;
 
     fn poll<R: BorrowMut<C>>(
@@ -260,6 +328,11 @@ where
             match &mut this.state {
                 ErasedFutureUnravelState::Future(future) => {
                     let item = ready!(Pin::new(future).poll(cx));
+                    this.state = ErasedFutureUnravelState::Wrap(ctx.wrap(item));
+                }
+                ErasedFutureUnravelState::Wrap(future) => {
+                    let item = ready!(Pin::new(future).poll(cx, &mut *ctx))
+                        .map_err(FutureUnravelError::Notify)?;
                     this.state = ErasedFutureUnravelState::Fork(ctx.fork(item));
                 }
                 ErasedFutureUnravelState::Fork(future) => {
@@ -305,9 +378,10 @@ where
     }
 }
 
-pub enum ErasedFutureCoalesce<T, C: ?Sized + Join<T>> {
+pub enum ErasedFutureCoalesce<T, C: ?Sized + Notify<T>> {
     Read,
-    Join(C::Future),
+    Join(<C as Join<<C as Notify<T>>::Notification>>::Future),
+    Unwrap(<C as Notify<T>>::Unwrap),
     Done,
 }
 
@@ -316,12 +390,15 @@ pub enum ErasedFutureCoalesce<T, C: ?Sized + Join<T>> {
     where
         T: Error + 'static,
         E: Error + 'static,
+        S: Error + 'static,
 )]
-pub enum ErasedFutureCoalesceError<T, E> {
+pub enum ErasedFutureCoalesceError<T, E, S> {
     #[error("failed to read handle for erased future: {0}")]
     Transport(T),
     #[error("failed to join erased future content: {0}")]
     Dispatch(E),
+    #[error("failed to unwrap erased future content: {0}")]
+    Notify(S),
 }
 
 #[derive(Debug, Error)]
@@ -337,13 +414,20 @@ pub enum FutureCoalesceError<E, T> {
     Contextualize(E),
 }
 
-impl<C: Unpin + ?Sized + Read<<C as Dispatch<T>>::Handle> + Join<T>, T> Future<C>
-    for ErasedFutureCoalesce<T, C>
+impl<
+        C: Unpin + ?Sized + Notify<T> + Read<<C as Dispatch<<C as Notify<T>>::Notification>>::Handle>,
+        T,
+    > Future<C> for ErasedFutureCoalesce<T, C>
 where
-    C::Future: Unpin,
+    <C as Join<<C as Notify<T>>::Notification>>::Future: Unpin,
+    C::Unwrap: Unpin,
 {
     type Ok = T;
-    type Error = ErasedFutureCoalesceError<C::Error, <C::Future as Future<C>>::Error>;
+    type Error = ErasedFutureCoalesceError<
+        C::Error,
+        <<C as Join<<C as Notify<T>>::Notification>>::Future as Future<C>>::Error,
+        <<C as Notify<T>>::Unwrap as Future<C>>::Error,
+    >;
 
     fn poll<R: BorrowMut<C>>(
         mut self: Pin<&mut Self>,
@@ -360,11 +444,19 @@ where
                         .map_err(ErasedFutureCoalesceError::Transport)?;
                     replace(&mut *self, ErasedFutureCoalesce::Join(ctx.join(handle)));
                 }
-                ErasedFutureCoalesce::Join(future) => {
+                ErasedFutureCoalesce::Unwrap(future) => {
                     let item = ready!(Pin::new(future).poll(cx, &mut *ctx))
-                        .map_err(ErasedFutureCoalesceError::Dispatch)?;
+                        .map_err(ErasedFutureCoalesceError::Notify)?;
                     replace(&mut *self, ErasedFutureCoalesce::Done);
                     return Poll::Ready(Ok(item));
+                }
+                ErasedFutureCoalesce::Join(future) => {
+                    let notification = ready!(Pin::new(future).poll(cx, &mut *ctx))
+                        .map_err(ErasedFutureCoalesceError::Dispatch)?;
+                    replace(
+                        &mut *self,
+                        ErasedFutureCoalesce::Unwrap(ctx.unwrap(notification)),
+                    );
                 }
                 ErasedFutureCoalesce::Done => panic!("FutureUnravel polled after completion"),
             }
@@ -385,9 +477,12 @@ where
     C::Output: Unpin,
     C: Unpin,
     P: Unpin,
+    <C::Target as Notify<T>>::Unwrap: Unpin,
     C::Future: 'a,
-    C::Target: Unpin + Read<<C::Target as Dispatch<T>>::Handle> + Join<T>,
-    <C::Target as Join<T>>::Future: Unpin,
+    C::Target: Unpin
+        + Read<<C::Target as Dispatch<<C::Target as Notify<T>>::Notification>>::Handle>
+        + Notify<T>,
+    <C::Target as Join<<C::Target as Notify<T>>::Notification>>::Future: Unpin,
 {
     type Ok = O;
     type Error = FutureCoalesceError<<C::Output as Future<C>>::Error, C::Error>;
@@ -435,10 +530,12 @@ macro_rules! marker_variants {
                 C::Output: Unpin,
                 C: Unpin,
                 C::Future: 'a $(+ $marker)*,
-                C::Target: Unpin + Read<<C::Target as Dispatch<T>>::Handle> + Join<T>,
-                <C::Target as Join<T>>::Future: Unpin,
-                <C::Target as Read<<C::Target as Dispatch<T>>::Handle>>::Error: Error + 'static,
-                <<C::Target as Join<T>>::Future as Future<C::Target>>::Error: Error + 'static
+                C::Target: Unpin + Read<<C::Target as Dispatch<<C::Target as Notify<T>>::Notification>>::Handle> + Notify<T>,
+                <C::Target as Join<<C::Target as Notify<T>>::Notification>>::Future: Unpin,
+                <C::Target as Notify<T>>::Unwrap: Unpin,
+                <C::Target as Read<<C::Target as Dispatch<<C::Target as Notify<T>>::Notification>>::Handle>>::Error: Error + 'static,
+                <<C::Target as Join<<C::Target as Notify<T>>::Notification>>::Future as Future<C::Target>>::Error: Error + 'static,
+                <<C::Target as Notify<T>>::Unwrap as Future<C::Target>>::Error: Error + 'static
             {
                 type Future = FutureCoalesce<'a, Self, fn(C::Future) -> Self, T, C>;
 
@@ -448,10 +545,12 @@ macro_rules! marker_variants {
                     ) -> Pin<Box<dyn future::Future<Output = T> + 'a $(+ $marker)*>>
                     where
                         C::Future: 'a $(+ $marker)*,
-                        <C::Target as Join<T>>::Future: Unpin,
-                        C::Target: Unpin + Read<<C::Target as Dispatch<T>>::Handle> + Join<T>,
-                        <C::Target as Read<<C::Target as Dispatch<T>>::Handle>>::Error: Error + 'static,
-                        <<C::Target as Join<T>>::Future as Future<C::Target>>::Error: Error + 'static
+                        C::Target: Unpin + Read<<C::Target as Dispatch<<C::Target as Notify<T>>::Notification>>::Handle> + Notify<T>,
+                        <C::Target as Join<<C::Target as Notify<T>>::Notification>>::Future: Unpin,
+                        <C::Target as Notify<T>>::Unwrap: Unpin,
+                        <C::Target as Read<<C::Target as Dispatch<<C::Target as Notify<T>>::Notification>>::Handle>>::Error: Error + 'static,
+                        <<C::Target as Join<<C::Target as Notify<T>>::Notification>>::Future as Future<C::Target>>::Error: Error + 'static,
+                        <<C::Target as Notify<T>>::Unwrap as Future<C::Target>>::Error: Error + 'static
                     {
                         Box::pin(fut.unwrap_or_else(|e| T::from_error(ProtocolError(Box::new(e)))))
                     }
@@ -467,14 +566,22 @@ macro_rules! marker_variants {
             impl<'a, T, C: ?Sized + Write<<C as Contextualizer>::Handle> + ContextualizeUnravel + Unpin> Unravel<C>
                 for Pin<Box<dyn future::Future<Output = T> + 'a $(+ $marker)*>>
             where
-                <C::Context as UnravelContext<C>>::Target: Write<<<C::Context as UnravelContext<C>>::Target as Dispatch<T>>::Handle>
-                    + Fork<T>,
+                <C::Context as UnravelContext<C>>::Target: Write<<<C::Context as UnravelContext<C>>::Target as Dispatch<<<C::Context as UnravelContext<C>>::Target as Notify<T>>::Notification>>::Handle>
+                    + Notify<T>,
                 T: Unpin,
                 C::Output: Unpin,
-                <<C::Context as UnravelContext<C>>::Target as Fork<T>>::Finalize: Unpin,
-                <<C::Context as UnravelContext<C>>::Target as Fork<T>>::Future: Unpin,
+                <<C::Context as UnravelContext<C>>::Target as Fork<
+                    <<C::Context as UnravelContext<C>>::Target as Notify<T>>::Notification,
+                >>::Finalize: Unpin,
+                <<C::Context as UnravelContext<C>>::Target as Fork<
+                    <<C::Context as UnravelContext<C>>::Target as Notify<T>>::Notification,
+                >>::Future: Unpin,
                 <C::Context as UnravelContext<C>>::Target: Unpin,
-                <<C::Context as UnravelContext<C>>::Target as Fork<T>>::Target: Unpin,
+                <<C::Context as UnravelContext<C>>::Target as Fork<
+                    <<C::Context as UnravelContext<C>>::Target as Notify<T>>::Notification,
+                >>::Target: Unpin,
+                T: Unpin,
+                <<C::Context as UnravelContext<C>>::Target as Notify<T>>::Wrap: Unpin,
             {
                 type Finalize = ErasedFutureUnravel<Self, C>;
                 type Target = FutureUnravel<Self, C>;
