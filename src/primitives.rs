@@ -1,5 +1,5 @@
 use crate::{
-    future::{ready, Ready},
+    future::{ok, Ready},
     Coalesce, Future, Read, Unravel, Write,
 };
 use core::{
@@ -40,7 +40,7 @@ impl<T: Unpin, C: Unpin + Write<T>> Future<C> for PrimitiveUnravel<T> {
                 }
             } else {
                 ready!(Pin::new(&mut *ctx).poll_flush(cx))?;
-                return Poll::Ready(Ok(ready(())));
+                return Poll::Ready(Ok(ok(())));
             }
         }
     }
@@ -103,7 +103,7 @@ impl<C: Unpin + Write<Self>> Unravel<C> for () {
     type Target = Ready<Ready<()>>;
 
     fn unravel(self) -> Self::Target {
-        ready(ready(()))
+        ok(ok(()))
     }
 }
 
@@ -111,7 +111,7 @@ impl<C: Unpin + Read<Self>> Coalesce<C> for () {
     type Future = Ready<()>;
 
     fn coalesce() -> Self::Future {
-        ready(())
+        ok(())
     }
 }
 
@@ -120,7 +120,7 @@ impl<T: Unpin + ?Sized, C: Unpin + Write<Self>> Unravel<C> for PhantomData<T> {
     type Target = Ready<Ready<()>>;
 
     fn unravel(self) -> Self::Target {
-        ready(ready(()))
+        ok(ok(()))
     }
 }
 
@@ -128,7 +128,7 @@ impl<T: Unpin + ?Sized, C: Unpin + Read<Self>> Coalesce<C> for PhantomData<T> {
     type Future = Ready<PhantomData<T>>;
 
     fn coalesce() -> Self::Future {
-        ready(PhantomData)
+        ok(PhantomData)
     }
 }
 
@@ -137,7 +137,7 @@ impl<T: Unpin, C: Unpin + Write<Self>> Unravel<C> for [T; 0] {
     type Target = Ready<Ready<()>>;
 
     fn unravel(self) -> Self::Target {
-        ready(ready(()))
+        ok(ok(()))
     }
 }
 
@@ -145,6 +145,6 @@ impl<T: Unpin, C: Unpin + Read<Self>> Coalesce<C> for [T; 0] {
     type Future = Ready<[T; 0]>;
 
     fn coalesce() -> Self::Future {
-        ready([])
+        ok([])
     }
 }

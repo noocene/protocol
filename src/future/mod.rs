@@ -10,7 +10,7 @@ mod either;
 pub use either::Either;
 use either::EitherState;
 mod ready;
-pub use ready::{ready, Ready};
+pub use ready::{err, ok, ready, Ready};
 pub mod finalize;
 pub use finalize::Finalize;
 

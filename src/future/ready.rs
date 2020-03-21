@@ -8,7 +8,7 @@ use core::{
 use void::Void;
 
 pub struct Ready<T, E = Void> {
-    data: Option<T>,
+    data: Option<Result<T, E>>,
     error: PhantomData<E>,
 }
 
@@ -23,13 +23,27 @@ impl<C: ?Sized, T: Unpin, E> Future<C> for Ready<T, E> {
         _: &mut Context,
         _: R,
     ) -> Poll<Result<Self::Ok, Self::Error>> {
-        Poll::Ready(Ok(self.data.take().expect("Ready polled after completion")))
+        Poll::Ready(self.data.take().expect("Ready polled after completion"))
     }
 }
 
-pub fn ready<T, E>(data: T) -> Ready<T, E> {
+pub fn ready<T, E>(data: Result<T, E>) -> Ready<T, E> {
     Ready {
         data: Some(data),
+        error: PhantomData,
+    }
+}
+
+pub fn ok<T, E>(data: T) -> Ready<T, E> {
+    Ready {
+        data: Some(Ok(data)),
+        error: PhantomData,
+    }
+}
+
+pub fn err<T, E>(data: E) -> Ready<T, E> {
+    Ready {
+        data: Some(Err(data)),
         error: PhantomData,
     }
 }

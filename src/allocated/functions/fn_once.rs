@@ -3,6 +3,7 @@ use crate::{
     Coalesce, ContextualizeCoalesce, ContextualizeUnravel, Contextualizer, Dispatch, Finalize,
     Fork, Future, Join, Notify, Read, Unravel, UnravelContext, Write,
 };
+use alloc::boxed::Box;
 use core::{
     borrow::BorrowMut,
     future,
@@ -11,7 +12,6 @@ use core::{
     pin::Pin,
     task::{Context, Poll},
 };
-use alloc::boxed::Box;
 use core_error::Error;
 use futures::ready;
 use thiserror::Error;

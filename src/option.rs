@@ -1,5 +1,5 @@
 use crate::{
-    future::{ready, Either, FutureExt, MapErr, Ready},
+    future::{ok, Either, FutureExt, MapErr, Ready},
     Coalesce, Dispatch, Fork, Future, Join, Read, Unravel, Write,
 };
 use core::{
@@ -150,7 +150,7 @@ where
                             replace(this, OptionUnravel::Target(target));
                         } else {
                             replace(this, OptionUnravel::Done);
-                            return Poll::Ready(Ok(FutureExt::<C>::into_right(ready(()))));
+                            return Poll::Ready(Ok(FutureExt::<C>::into_right(ok(()))));
                         }
                     } else {
                         panic!("invalid state in OptionUnravel Write")

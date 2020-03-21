@@ -1,6 +1,6 @@
 use super::Future;
 use crate::{
-    future::{ready, Ready},
+    future::{ok, Ready},
     Fork,
 };
 use arrayvec::{Array, ArrayVec, IntoIter};
@@ -122,7 +122,7 @@ impl<C: ?Sized, T: Future<C>> Future<C> for Finalize<C, [T; 0]> {
         _: &mut Context,
         _: R,
     ) -> Poll<Result<Self::Ok, Self::Error>> {
-        Poll::Ready(Ok(ready(())))
+        Poll::Ready(Ok(ok(())))
     }
 }
 
