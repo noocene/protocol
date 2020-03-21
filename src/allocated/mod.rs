@@ -1,4 +1,5 @@
 mod errors;
+mod functions;
 mod futures;
 mod vec;
 use alloc::boxed::Box;
@@ -11,7 +12,13 @@ use thiserror::Error;
 
 #[derive(Error)]
 #[error(transparent)]
-pub struct ProtocolError(Box<dyn Error>);
+pub struct ProtocolError(Box<dyn Error + Send>);
+
+impl ProtocolError {
+    pub fn new<T: Error + Send + 'static>(error: T) -> Self {
+        ProtocolError(Box::new(error))
+    }
+}
 
 impl Debug for ProtocolError {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {

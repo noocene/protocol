@@ -29,7 +29,7 @@ pub trait Notify<T>:
     type Unwrap: Future<Self, Ok = T>;
 
     fn wrap(&mut self, item: T) -> Self::Wrap;
-    fn unwrap(&mut self, notifiaction: Self::Notification) -> Self::Unwrap;
+    fn unwrap(&mut self, notification: Self::Notification) -> Self::Unwrap;
 }
 
 pub trait Unravel<C: ?Sized> {
@@ -37,6 +37,13 @@ pub trait Unravel<C: ?Sized> {
     type Target: Future<C, Ok = Self::Finalize>;
 
     fn unravel(self) -> Self::Target;
+}
+
+pub trait Finalize<T: Future<Self::Target>> {
+    type Target;
+    type Output: Future<Self, Ok = ()>;
+
+    fn finalize(&mut self, future: T) -> Self::Output;
 }
 
 pub trait Coalesce<C: ?Sized>: Sized {

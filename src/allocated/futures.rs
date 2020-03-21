@@ -527,9 +527,9 @@ macro_rules! marker_variants {
                 C::Context: Unpin + Read<<C::Context as Dispatch<<C::Context as Notify<T>>::Notification>>::Handle> + Notify<T> + 'a $(+ $marker)*,
                 <C::Context as Join<<C::Context as Notify<T>>::Notification>>::Future: Unpin + 'a $(+ $marker)*,
                 <C::Context as Notify<T>>::Unwrap: Unpin + 'a $(+ $marker)*,
-                <C::Context as Read<<C::Context as Dispatch<<C::Context as Notify<T>>::Notification>>::Handle>>::Error: Error + 'static,
-                <<C::Context as Join<<C::Context as Notify<T>>::Notification>>::Future as Future<C::Context>>::Error: Error + 'static,
-                <<C::Context as Notify<T>>::Unwrap as Future<C::Context>>::Error: Error + 'static
+                <C::Context as Read<<C::Context as Dispatch<<C::Context as Notify<T>>::Notification>>::Handle>>::Error: Error + 'static + Send,
+                <<C::Context as Join<<C::Context as Notify<T>>::Notification>>::Future as Future<C::Context>>::Error: Error + 'static + Send,
+                <<C::Context as Notify<T>>::Unwrap as Future<C::Context>>::Error: Error + 'static + Send
             {
                 type Future = FutureCoalesce<'a, Self, fn(ErasedFutureCoalesce<T, C::Context>) -> Self, T, C>;
 
@@ -541,9 +541,9 @@ macro_rules! marker_variants {
                         C::Context: Unpin + Read<<C::Context as Dispatch<<C::Context as Notify<T>>::Notification>>::Handle> + Notify<T> + 'a $(+ $marker)*,
                         <C::Context as Join<<C::Context as Notify<T>>::Notification>>::Future: Unpin + 'a $(+ $marker)*,
                         <C::Context as Notify<T>>::Unwrap: Unpin + 'a $(+ $marker)*,
-                        <C::Context as Read<<C::Context as Dispatch<<C::Context as Notify<T>>::Notification>>::Handle>>::Error: Error + 'static,
-                        <<C::Context as Join<<C::Context as Notify<T>>::Notification>>::Future as Future<C::Context>>::Error: Error + 'static,
-                        <<C::Context as Notify<T>>::Unwrap as Future<C::Context>>::Error: Error + 'static
+                        <C::Context as Read<<C::Context as Dispatch<<C::Context as Notify<T>>::Notification>>::Handle>>::Error: Error + 'static + Send,
+                        <<C::Context as Join<<C::Context as Notify<T>>::Notification>>::Future as Future<C::Context>>::Error: Error + 'static + Send,
+                        <<C::Context as Notify<T>>::Unwrap as Future<C::Context>>::Error: Error + 'static + Send
                     {
                         Box::pin(fut.unwrap_or_else(|e| T::from_error(ProtocolError(Box::new(e)))))
                     }
