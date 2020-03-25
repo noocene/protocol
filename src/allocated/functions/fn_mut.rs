@@ -2149,10 +2149,6 @@ macro_rules! marker_variants {
     };
 }
 
-pub trait Null {}
-
-impl<T> Null for T {}
-
 marker_variants! {
     ,
     Unpin,
