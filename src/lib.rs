@@ -6,7 +6,7 @@ extern crate alloc;
 use core::{
     borrow::BorrowMut,
     pin::Pin,
-    task::{Context, Poll},
+    task::{Context as FContext, Poll},
 };
 mod arrays;
 pub mod future;
@@ -46,6 +46,13 @@ pub trait Finalize<T: Future<Self::Target>> {
     fn finalize(&mut self, future: T) -> Self::Output;
 }
 
+pub trait FinalizeImmediate<T: Future<Self::Target>> {
+    type Target;
+    type Error;
+
+    fn finalize(&mut self, future: T) -> Result<(), Self::Error>;
+}
+
 pub trait Coalesce<C: ?Sized>: Sized {
     type Future: Future<C, Ok = Self>;
 
@@ -70,52 +77,61 @@ pub trait Join<P>: Dispatch<P> {
     fn join(&mut self, handle: Self::Handle) -> Self::Future;
 }
 
-pub trait UnravelContext<C: ?Sized> {
+pub trait ContextReference<C: ?Sized> {
     type Target;
 
     fn with<'a, 'b: 'a, R: BorrowMut<C> + 'b>(&'a mut self, ctx: R) -> &'a mut Self::Target;
 }
 
-pub trait ContextualizeUnravel: Contextualizer {
-    type Context: UnravelContext<Self>;
-    type Output: Future<Self, Ok = (Self::Context, Self::Handle)>;
+pub trait ReferenceContext: Contextualize {
+    type Context: ContextReference<Self>;
+    type JoinOutput: Future<Self, Ok = Self::Context>;
+    type ForkOutput: Future<Self, Ok = (Self::Context, Self::Handle)>;
 
-    fn contextualize(&mut self) -> Self::Output;
+    fn join_ref(&mut self, handle: Self::Handle) -> Self::JoinOutput;
+    fn fork_ref(&mut self) -> Self::ForkOutput;
 }
 
-pub trait Contextualizer {
+pub trait Contextualize {
     type Handle;
 }
 
-pub trait CoalesceContextualizer: Contextualizer {
-    type Target;
+pub trait CloneContext: Contextualize {
+    type Context;
+    type JoinOutput: Future<Self, Ok = Self::Context>;
+    type ForkOutput: Future<Self, Ok = (Self::Context, Self::Handle)>;
+
+    fn join_owned(&mut self, handle: Self::Handle) -> Self::JoinOutput;
+    fn fork_owned(&mut self) -> Self::ForkOutput;
 }
 
-pub trait ContextualizeCoalesce: CoalesceContextualizer {
-    type Context;
-    type Output: Future<Self, Ok = Self::Context>;
+pub trait ShareContext: Contextualize {
+    type Context: Clone;
+    type JoinOutput: Future<Self, Ok = Self::Context>;
+    type ForkOutput: Future<Self, Ok = (Self::Context, Self::Handle)>;
 
-    fn contextualize(&mut self, handle: Self::Handle) -> Self::Output;
+    fn join_shared(&mut self, handle: Self::Handle) -> Self::JoinOutput;
+    fn fork_shared(&mut self) -> Self::ForkOutput;
 }
 
 pub trait Write<T> {
     type Error;
 
-    fn poll_ready(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>>;
+    fn poll_ready(self: Pin<&mut Self>, cx: &mut FContext) -> Poll<Result<(), Self::Error>>;
     fn write(self: Pin<&mut Self>, data: T) -> Result<(), Self::Error>;
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>>;
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut FContext) -> Poll<Result<(), Self::Error>>;
 }
 
 impl<'a, T, U: Unpin + Write<T>> Write<T> for &'a mut U {
     type Error = U::Error;
 
-    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut FContext) -> Poll<Result<(), Self::Error>> {
         <U as Write<T>>::poll_ready(Pin::new(&mut **self), cx)
     }
     fn write(mut self: Pin<&mut Self>, data: T) -> Result<(), Self::Error> {
         <U as Write<T>>::write(Pin::new(&mut **self), data)
     }
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut FContext) -> Poll<Result<(), Self::Error>> {
         <U as Write<T>>::poll_flush(Pin::new(&mut **self), cx)
     }
 }
@@ -123,13 +139,13 @@ impl<'a, T, U: Unpin + Write<T>> Write<T> for &'a mut U {
 pub trait Read<T> {
     type Error;
 
-    fn read(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<T, Self::Error>>;
+    fn read(self: Pin<&mut Self>, cx: &mut FContext) -> Poll<Result<T, Self::Error>>;
 }
 
 impl<'a, T, U: Unpin + Read<T>> Read<T> for &'a mut U {
     type Error = U::Error;
 
-    fn read(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<T, Self::Error>> {
+    fn read(mut self: Pin<&mut Self>, cx: &mut FContext) -> Poll<Result<T, Self::Error>> {
         <U as Read<T>>::read(Pin::new(&mut **self), cx)
     }
 }

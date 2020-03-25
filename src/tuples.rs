@@ -572,14 +572,14 @@ pub struct Tuple2Coalesce<
 }
 
 impl<
-        T: Unpin,
-        U: Unpin,
-        C: ?Sized
-            + Write<(<C as Dispatch<T>>::Handle, <C as Dispatch<U>>::Handle)>
-            + Fork<T>
-            + Fork<U>
-            + Unpin,
-    > Future<C> for Tuple2Unravel<T, U, C>
+    T: Unpin,
+    U: Unpin,
+    C: ?Sized
+        + Write<(<C as Dispatch<T>>::Handle, <C as Dispatch<U>>::Handle)>
+        + Fork<T>
+        + Fork<U>
+        + Unpin,
+> Future<C> for Tuple2Unravel<T, U, C>
 where
     <C as Fork<T>>::Future: Unpin,
     <C as Fork<U>>::Future: Unpin,
@@ -705,14 +705,14 @@ where
 }
 
 impl<
-        T: Unpin,
-        U: Unpin,
-        C: ?Sized
-            + Read<(<C as Dispatch<T>>::Handle, <C as Dispatch<U>>::Handle)>
-            + Join<T>
-            + Join<U>
-            + Unpin,
-    > Future<C> for Tuple2Coalesce<T, U, C>
+    T: Unpin,
+    U: Unpin,
+    C: ?Sized
+        + Read<(<C as Dispatch<T>>::Handle, <C as Dispatch<U>>::Handle)>
+        + Join<T>
+        + Join<U>
+        + Unpin,
+> Future<C> for Tuple2Coalesce<T, U, C>
 where
     <C as Join<T>>::Future: Unpin,
     <C as Join<U>>::Future: Unpin,
@@ -777,14 +777,14 @@ where
 }
 
 impl<
-        T: Unpin,
-        U: Unpin,
-        C: ?Sized
-            + Write<(<C as Dispatch<T>>::Handle, <C as Dispatch<U>>::Handle)>
-            + Fork<T>
-            + Fork<U>
-            + Unpin,
-    > Unravel<C> for (T, U)
+    T: Unpin,
+    U: Unpin,
+    C: ?Sized
+        + Write<(<C as Dispatch<T>>::Handle, <C as Dispatch<U>>::Handle)>
+        + Fork<T>
+        + Fork<U>
+        + Unpin,
+> Unravel<C> for (T, U)
 where
     <C as Fork<T>>::Future: Unpin,
     <C as Fork<U>>::Future: Unpin,
@@ -838,14 +838,14 @@ where
 }
 
 impl<
-        T: Unpin,
-        U: Unpin,
-        C: ?Sized
-            + Read<(<C as Dispatch<T>>::Handle, <C as Dispatch<U>>::Handle)>
-            + Join<T>
-            + Join<U>
-            + Unpin,
-    > Coalesce<C> for (T, U)
+    T: Unpin,
+    U: Unpin,
+    C: ?Sized
+        + Read<(<C as Dispatch<T>>::Handle, <C as Dispatch<U>>::Handle)>
+        + Join<T>
+        + Join<U>
+        + Unpin,
+> Coalesce<C> for (T, U)
 where
     <C as Join<T>>::Future: Unpin,
     <C as Join<U>>::Future: Unpin,

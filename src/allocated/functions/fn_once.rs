@@ -1,7 +1,7 @@
 use crate::{
     allocated::{Flatten, ProtocolError},
-    Coalesce, ContextualizeCoalesce, ContextualizeUnravel, Contextualizer, Dispatch, Finalize,
-    Fork, Future, Join, Notify, Read, Unravel, UnravelContext, Write,
+    CloneContext, Coalesce, ContextReference, Contextualize, Dispatch, Finalize, Fork, Future,
+    Join, Notify, Read, ReferenceContext, Unravel, Write,
 };
 use alloc::boxed::Box;
 use core::{
@@ -53,70 +53,70 @@ pub enum FnOnceUnravelError<A, B, C, Z, K, T, I, U, V, W> {
     Finalize(#[source] W),
 }
 
-pub enum ErasedFnOnceUnravelState<C: ?Sized + ContextualizeUnravel, T, U>
+pub enum ErasedFnOnceUnravelState<C: ?Sized + ReferenceContext, T, U>
 where
-    <C::Context as UnravelContext<C>>::Target: Notify<T>
+    <C::Context as ContextReference<C>>::Target: Notify<T>
         + Notify<U>
         + Read<
-            <<C::Context as UnravelContext<C>>::Target as Dispatch<
-                <<C::Context as UnravelContext<C>>::Target as Notify<T>>::Notification,
+            <<C::Context as ContextReference<C>>::Target as Dispatch<
+                <<C::Context as ContextReference<C>>::Target as Notify<T>>::Notification,
             >>::Handle,
         > + Write<
-            <<C::Context as UnravelContext<C>>::Target as Dispatch<
-                <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
+            <<C::Context as ContextReference<C>>::Target as Dispatch<
+                <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
             >>::Handle,
         >,
 {
     Read,
     Join(
-        <<C::Context as UnravelContext<C>>::Target as Join<
-            <<C::Context as UnravelContext<C>>::Target as Notify<T>>::Notification,
+        <<C::Context as ContextReference<C>>::Target as Join<
+            <<C::Context as ContextReference<C>>::Target as Notify<T>>::Notification,
         >>::Future,
     ),
-    Unwrap(<<C::Context as UnravelContext<C>>::Target as Notify<T>>::Unwrap),
-    Wrap(<<C::Context as UnravelContext<C>>::Target as Notify<U>>::Wrap),
+    Unwrap(<<C::Context as ContextReference<C>>::Target as Notify<T>>::Unwrap),
+    Wrap(<<C::Context as ContextReference<C>>::Target as Notify<U>>::Wrap),
     Fork(
-        <<C::Context as UnravelContext<C>>::Target as Fork<
-            <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
+        <<C::Context as ContextReference<C>>::Target as Fork<
+            <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
         >>::Future,
     ),
     Write(
-        <<C::Context as UnravelContext<C>>::Target as Fork<
-            <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
+        <<C::Context as ContextReference<C>>::Target as Fork<
+            <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
         >>::Target,
-        <<C::Context as UnravelContext<C>>::Target as Dispatch<
-            <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
+        <<C::Context as ContextReference<C>>::Target as Dispatch<
+            <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
         >>::Handle,
     ),
     Flush(
-        <<C::Context as UnravelContext<C>>::Target as Fork<
-            <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
+        <<C::Context as ContextReference<C>>::Target as Fork<
+            <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
         >>::Target,
     ),
     Target(
-        <<C::Context as UnravelContext<C>>::Target as Fork<
-            <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
+        <<C::Context as ContextReference<C>>::Target as Fork<
+            <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
         >>::Target,
     ),
     Finalize(
-        <<C::Context as UnravelContext<C>>::Target as Fork<
-            <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
+        <<C::Context as ContextReference<C>>::Target as Fork<
+            <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
         >>::Finalize,
     ),
     Done,
 }
 
-pub struct ErasedFnOnceUnravel<C: ?Sized + ContextualizeUnravel, T, U, F, M: Fn(F, T) -> U>
+pub struct ErasedFnOnceUnravel<C: ?Sized + ReferenceContext, T, U, F, M: Fn(F, T) -> U>
 where
-    <C::Context as UnravelContext<C>>::Target: Notify<T>
+    <C::Context as ContextReference<C>>::Target: Notify<T>
         + Notify<U>
         + Read<
-            <<C::Context as UnravelContext<C>>::Target as Dispatch<
-                <<C::Context as UnravelContext<C>>::Target as Notify<T>>::Notification,
+            <<C::Context as ContextReference<C>>::Target as Dispatch<
+                <<C::Context as ContextReference<C>>::Target as Notify<T>>::Notification,
             >>::Handle,
         > + Write<
-            <<C::Context as UnravelContext<C>>::Target as Dispatch<
-                <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
+            <<C::Context as ContextReference<C>>::Target as Dispatch<
+                <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
             >>::Handle,
         >,
 {
@@ -126,91 +126,86 @@ where
     context: C::Context,
 }
 
-impl<C: ?Sized + ContextualizeUnravel, T, U, F, M: Fn(F, T) -> U> Unpin
+impl<C: ?Sized + ReferenceContext, T, U, F, M: Fn(F, T) -> U> Unpin
     for ErasedFnOnceUnravel<C, T, U, F, M>
 where
-    <C::Context as UnravelContext<C>>::Target: Notify<T>
+    <C::Context as ContextReference<C>>::Target: Notify<T>
         + Notify<U>
         + Read<
-            <<C::Context as UnravelContext<C>>::Target as Dispatch<
-                <<C::Context as UnravelContext<C>>::Target as Notify<T>>::Notification,
+            <<C::Context as ContextReference<C>>::Target as Dispatch<
+                <<C::Context as ContextReference<C>>::Target as Notify<T>>::Notification,
             >>::Handle,
         > + Write<
-            <<C::Context as UnravelContext<C>>::Target as Dispatch<
-                <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
+            <<C::Context as ContextReference<C>>::Target as Dispatch<
+                <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
             >>::Handle,
         >,
 {
 }
 
-impl<
-        C: ?Sized + Write<<C as Contextualizer>::Handle> + ContextualizeUnravel,
-        T,
-        U,
-        F,
-        M: Fn(F, T) -> U,
-    > Future<C> for ErasedFnOnceUnravel<C, T, U, F, M>
+impl<C: ?Sized + Write<<C as Contextualize>::Handle> + ReferenceContext, T, U, F, M: Fn(F, T) -> U>
+    Future<C> for ErasedFnOnceUnravel<C, T, U, F, M>
 where
-    <C::Context as UnravelContext<C>>::Target: Notify<T>
+    <C::Context as ContextReference<C>>::Target: Notify<T>
         + Notify<U>
         + Read<
-            <<C::Context as UnravelContext<C>>::Target as Dispatch<
-                <<C::Context as UnravelContext<C>>::Target as Notify<T>>::Notification,
+            <<C::Context as ContextReference<C>>::Target as Dispatch<
+                <<C::Context as ContextReference<C>>::Target as Notify<T>>::Notification,
             >>::Handle,
         > + Write<
-            <<C::Context as UnravelContext<C>>::Target as Dispatch<
-                <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
+            <<C::Context as ContextReference<C>>::Target as Dispatch<
+                <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
             >>::Handle,
         >,
     U: Unpin,
-    <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Wrap: Unpin,
-    <<C::Context as UnravelContext<C>>::Target as Fork<
-        <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
+    <<C::Context as ContextReference<C>>::Target as Notify<U>>::Wrap: Unpin,
+    <<C::Context as ContextReference<C>>::Target as Fork<
+        <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
     >>::Target: Unpin,
-    <<C::Context as UnravelContext<C>>::Target as Fork<
-        <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
+    <<C::Context as ContextReference<C>>::Target as Fork<
+        <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
     >>::Future: Unpin,
-    <<C::Context as UnravelContext<C>>::Target as Fork<
-        <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
+    <<C::Context as ContextReference<C>>::Target as Fork<
+        <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
     >>::Finalize: Unpin,
-    <C::Context as UnravelContext<C>>::Target: Unpin,
-    <<C::Context as UnravelContext<C>>::Target as Notify<T>>::Unwrap: Unpin,
-    <<C::Context as UnravelContext<C>>::Target as Join<
-        <<C::Context as UnravelContext<C>>::Target as Notify<T>>::Notification,
+    <C::Context as ContextReference<C>>::Target: Unpin,
+    <<C::Context as ContextReference<C>>::Target as Notify<T>>::Unwrap: Unpin,
+    <<C::Context as ContextReference<C>>::Target as Join<
+        <<C::Context as ContextReference<C>>::Target as Notify<T>>::Notification,
     >>::Future: Unpin,
 {
     type Ok = ();
     type Error = FnOnceUnravelError<
-        <<C::Context as UnravelContext<C>>::Target as Read<
-            <<C::Context as UnravelContext<C>>::Target as Dispatch<
-                <<C::Context as UnravelContext<C>>::Target as Notify<T>>::Notification,
+        <<C::Context as ContextReference<C>>::Target as Read<
+            <<C::Context as ContextReference<C>>::Target as Dispatch<
+                <<C::Context as ContextReference<C>>::Target as Notify<T>>::Notification,
             >>::Handle,
         >>::Error,
-        <<<C::Context as UnravelContext<C>>::Target as Notify<T>>::Unwrap as Future<
-            <C::Context as UnravelContext<C>>::Target,
+        <<<C::Context as ContextReference<C>>::Target as Notify<T>>::Unwrap as Future<
+            <C::Context as ContextReference<C>>::Target,
         >>::Error,
-        <<<C::Context as UnravelContext<C>>::Target as Join<
-            <<C::Context as UnravelContext<C>>::Target as Notify<T>>::Notification,
-        >>::Future as Future<<C::Context as UnravelContext<C>>::Target>>::Error,
-        <C::Output as Future<C>>::Error,
+        <<<C::Context as ContextReference<C>>::Target as Join<
+            <<C::Context as ContextReference<C>>::Target as Notify<T>>::Notification,
+        >>::Future as Future<<C::Context as ContextReference<C>>::Target>>::Error,
+        <C::ForkOutput as Future<C>>::Error,
         C::Error,
-        <<C::Context as UnravelContext<C>>::Target as Write<
-            <<C::Context as UnravelContext<C>>::Target as Dispatch<
-                <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
+        <<C::Context as ContextReference<C>>::Target as Write<
+            <<C::Context as ContextReference<C>>::Target as Dispatch<
+                <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
             >>::Handle,
         >>::Error,
-        <<<C::Context as UnravelContext<C>>::Target as Notify<U>>::Wrap as Future<
-            <C::Context as UnravelContext<C>>::Target,
+        <<<C::Context as ContextReference<C>>::Target as Notify<U>>::Wrap as Future<
+            <C::Context as ContextReference<C>>::Target,
         >>::Error,
-        <<<C::Context as UnravelContext<C>>::Target as Fork<
-            <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
-        >>::Future as Future<<C::Context as UnravelContext<C>>::Target>>::Error,
-        <<<C::Context as UnravelContext<C>>::Target as Fork<
-            <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
-        >>::Target as Future<<C::Context as UnravelContext<C>>::Target>>::Error,
-        <<<C::Context as UnravelContext<C>>::Target as Fork<
-            <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
-        >>::Finalize as Future<<C::Context as UnravelContext<C>>::Target>>::Error,
+        <<<C::Context as ContextReference<C>>::Target as Fork<
+            <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
+        >>::Future as Future<<C::Context as ContextReference<C>>::Target>>::Error,
+        <<<C::Context as ContextReference<C>>::Target as Fork<
+            <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
+        >>::Target as Future<<C::Context as ContextReference<C>>::Target>>::Error,
+        <<<C::Context as ContextReference<C>>::Target as Fork<
+            <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
+        >>::Finalize as Future<<C::Context as ContextReference<C>>::Target>>::Error,
     >;
 
     fn poll<R: BorrowMut<C>>(
@@ -228,7 +223,7 @@ where
                     let mut ct = Pin::new(&mut *ctx);
                     let handle = ready!(ct.as_mut().read(cx)).map_err(FnOnceUnravelError::Read)?;
                     this.state = ErasedFnOnceUnravelState::Join(Join::<
-                        <<C::Context as UnravelContext<C>>::Target as Notify<T>>::Notification,
+                        <<C::Context as ContextReference<C>>::Target as Notify<T>>::Notification,
                     >::join(
                         &mut *ctx, handle
                     ));
@@ -236,11 +231,12 @@ where
                 ErasedFnOnceUnravelState::Join(future) => {
                     let notification = ready!(Pin::new(future).poll(cx, &mut *ctx))
                         .map_err(FnOnceUnravelError::Join)?;
-                    this.state = ErasedFnOnceUnravelState::Unwrap(<<C::Context as UnravelContext<
-                        C,
-                    >>::Target as Notify<T>>::unwrap(
-                        &mut *ctx, notification
-                    ));
+                    this.state = ErasedFnOnceUnravelState::Unwrap(
+                        <<C::Context as ContextReference<C>>::Target as Notify<T>>::unwrap(
+                            &mut *ctx,
+                            notification,
+                        ),
+                    );
                 }
                 ErasedFnOnceUnravelState::Unwrap(future) => {
                     let item = ready!(Pin::new(future).poll(cx, &mut *ctx))
@@ -291,84 +287,83 @@ where
                     this.state = ErasedFnOnceUnravelState::Done;
                     return Poll::Ready(Ok(()));
                 }
-                ErasedFnOnceUnravelState::Done => panic!("FutureUnravel polled after completion"),
+                ErasedFnOnceUnravelState::Done => {
+                    panic!("ErasedFnOnceUnravel polled after completion")
+                }
             }
         }
     }
 }
 
-enum FnOnceUnravelState<
-    C: ?Sized + Write<<C as Contextualizer>::Handle> + ContextualizeUnravel,
-    T,
-    U,
-> where
-    <C::Context as UnravelContext<C>>::Target: Notify<T>
+enum FnOnceUnravelState<C: ?Sized + Write<<C as Contextualize>::Handle> + ReferenceContext, T, U>
+where
+    <C::Context as ContextReference<C>>::Target: Notify<T>
         + Notify<U>
         + Read<
-            <<C::Context as UnravelContext<C>>::Target as Dispatch<
-                <<C::Context as UnravelContext<C>>::Target as Notify<T>>::Notification,
+            <<C::Context as ContextReference<C>>::Target as Dispatch<
+                <<C::Context as ContextReference<C>>::Target as Notify<T>>::Notification,
             >>::Handle,
         > + Write<
-            <<C::Context as UnravelContext<C>>::Target as Dispatch<
-                <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
+            <<C::Context as ContextReference<C>>::Target as Dispatch<
+                <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
             >>::Handle,
         >,
     U: Unpin,
-    <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Wrap: Unpin,
-    <<C::Context as UnravelContext<C>>::Target as Fork<
-        <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
+    <<C::Context as ContextReference<C>>::Target as Notify<U>>::Wrap: Unpin,
+    <<C::Context as ContextReference<C>>::Target as Fork<
+        <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
     >>::Target: Unpin,
-    <<C::Context as UnravelContext<C>>::Target as Fork<
-        <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
+    <<C::Context as ContextReference<C>>::Target as Fork<
+        <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
     >>::Future: Unpin,
-    <<C::Context as UnravelContext<C>>::Target as Fork<
-        <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
+    <<C::Context as ContextReference<C>>::Target as Fork<
+        <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
     >>::Finalize: Unpin,
-    <C::Context as UnravelContext<C>>::Target: Unpin,
-    <<C::Context as UnravelContext<C>>::Target as Notify<T>>::Unwrap: Unpin,
-    <<C::Context as UnravelContext<C>>::Target as Join<
-        <<C::Context as UnravelContext<C>>::Target as Notify<T>>::Notification,
+    <C::Context as ContextReference<C>>::Target: Unpin,
+    <<C::Context as ContextReference<C>>::Target as Notify<T>>::Unwrap: Unpin,
+    <<C::Context as ContextReference<C>>::Target as Join<
+        <<C::Context as ContextReference<C>>::Target as Notify<T>>::Notification,
     >>::Future: Unpin,
 {
     None(PhantomData<(T, U)>),
-    Context(C::Output),
+    Context(C::ForkOutput),
     Write(C::Context, C::Handle),
     Flush(C::Context),
 }
 
 pub struct FnOnceUnravel<
-    C: ?Sized + Write<<C as Contextualizer>::Handle> + ContextualizeUnravel,
+    C: ?Sized + Write<<C as Contextualize>::Handle> + ReferenceContext,
     T,
     U,
     F,
     M: Fn(F, T) -> U,
 > where
-    <C::Context as UnravelContext<C>>::Target: Notify<T>
+    <C::Context as ContextReference<C>>::Target: Notify<T>
         + Notify<U>
         + Read<
-            <<C::Context as UnravelContext<C>>::Target as Dispatch<
-                <<C::Context as UnravelContext<C>>::Target as Notify<T>>::Notification,
+            <<C::Context as ContextReference<C>>::Target as Dispatch<
+                <<C::Context as ContextReference<C>>::Target as Notify<T>>::Notification,
             >>::Handle,
         > + Write<
-            <<C::Context as UnravelContext<C>>::Target as Dispatch<
-                <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
+            <<C::Context as ContextReference<C>>::Target as Dispatch<
+                <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
             >>::Handle,
         >,
     U: Unpin,
-    <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Wrap: Unpin,
-    <<C::Context as UnravelContext<C>>::Target as Fork<
-        <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
+    <<C::Context as ContextReference<C>>::Target as Notify<U>>::Wrap: Unpin,
+    <<C::Context as ContextReference<C>>::Target as Fork<
+        <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
     >>::Target: Unpin,
-    <<C::Context as UnravelContext<C>>::Target as Fork<
-        <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
+    <<C::Context as ContextReference<C>>::Target as Fork<
+        <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
     >>::Future: Unpin,
-    <<C::Context as UnravelContext<C>>::Target as Fork<
-        <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
+    <<C::Context as ContextReference<C>>::Target as Fork<
+        <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
     >>::Finalize: Unpin,
-    <C::Context as UnravelContext<C>>::Target: Unpin,
-    <<C::Context as UnravelContext<C>>::Target as Notify<T>>::Unwrap: Unpin,
-    <<C::Context as UnravelContext<C>>::Target as Join<
-        <<C::Context as UnravelContext<C>>::Target as Notify<T>>::Notification,
+    <C::Context as ContextReference<C>>::Target: Unpin,
+    <<C::Context as ContextReference<C>>::Target as Notify<T>>::Unwrap: Unpin,
+    <<C::Context as ContextReference<C>>::Target as Join<
+        <<C::Context as ContextReference<C>>::Target as Notify<T>>::Notification,
     >>::Future: Unpin,
 {
     call: Option<F>,
@@ -376,116 +371,106 @@ pub struct FnOnceUnravel<
     conv: Option<M>,
 }
 
-impl<
-        C: ?Sized + Write<<C as Contextualizer>::Handle> + ContextualizeUnravel,
-        T,
-        U,
-        F,
-        M: Fn(F, T) -> U,
-    > Unpin for FnOnceUnravel<C, T, U, F, M>
+impl<C: ?Sized + Write<<C as Contextualize>::Handle> + ReferenceContext, T, U, F, M: Fn(F, T) -> U> Unpin
+    for FnOnceUnravel<C, T, U, F, M>
 where
-    <C::Context as UnravelContext<C>>::Target: Notify<T>
+    <C::Context as ContextReference<C>>::Target: Notify<T>
         + Notify<U>
         + Read<
-            <<C::Context as UnravelContext<C>>::Target as Dispatch<
-                <<C::Context as UnravelContext<C>>::Target as Notify<T>>::Notification,
+            <<C::Context as ContextReference<C>>::Target as Dispatch<
+                <<C::Context as ContextReference<C>>::Target as Notify<T>>::Notification,
             >>::Handle,
         > + Write<
-            <<C::Context as UnravelContext<C>>::Target as Dispatch<
-                <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
+            <<C::Context as ContextReference<C>>::Target as Dispatch<
+                <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
             >>::Handle,
         >,
     U: Unpin,
-    <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Wrap: Unpin,
-    <<C::Context as UnravelContext<C>>::Target as Fork<
-        <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
+    <<C::Context as ContextReference<C>>::Target as Notify<U>>::Wrap: Unpin,
+    <<C::Context as ContextReference<C>>::Target as Fork<
+        <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
     >>::Target: Unpin,
-    <<C::Context as UnravelContext<C>>::Target as Fork<
-        <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
+    <<C::Context as ContextReference<C>>::Target as Fork<
+        <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
     >>::Future: Unpin,
-    <<C::Context as UnravelContext<C>>::Target as Fork<
-        <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
+    <<C::Context as ContextReference<C>>::Target as Fork<
+        <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
     >>::Finalize: Unpin,
-    <C::Context as UnravelContext<C>>::Target: Unpin,
-    <<C::Context as UnravelContext<C>>::Target as Notify<T>>::Unwrap: Unpin,
-    <<C::Context as UnravelContext<C>>::Target as Join<
-        <<C::Context as UnravelContext<C>>::Target as Notify<T>>::Notification,
+    <C::Context as ContextReference<C>>::Target: Unpin,
+    <<C::Context as ContextReference<C>>::Target as Notify<T>>::Unwrap: Unpin,
+    <<C::Context as ContextReference<C>>::Target as Join<
+        <<C::Context as ContextReference<C>>::Target as Notify<T>>::Notification,
     >>::Future: Unpin,
-    C::Output: Unpin,
+    C::ForkOutput: Unpin,
     C: Unpin,
 {
 }
 
-impl<
-        C: ?Sized + Write<<C as Contextualizer>::Handle> + ContextualizeUnravel,
-        T,
-        U,
-        F,
-        M: Fn(F, T) -> U,
-    > Future<C> for FnOnceUnravel<C, T, U, F, M>
+impl<C: ?Sized + Write<<C as Contextualize>::Handle> + ReferenceContext, T, U, F, M: Fn(F, T) -> U>
+    Future<C> for FnOnceUnravel<C, T, U, F, M>
 where
-    <C::Context as UnravelContext<C>>::Target: Notify<T>
+    <C::Context as ContextReference<C>>::Target: Notify<T>
         + Notify<U>
         + Read<
-            <<C::Context as UnravelContext<C>>::Target as Dispatch<
-                <<C::Context as UnravelContext<C>>::Target as Notify<T>>::Notification,
+            <<C::Context as ContextReference<C>>::Target as Dispatch<
+                <<C::Context as ContextReference<C>>::Target as Notify<T>>::Notification,
             >>::Handle,
         > + Write<
-            <<C::Context as UnravelContext<C>>::Target as Dispatch<
-                <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
+            <<C::Context as ContextReference<C>>::Target as Dispatch<
+                <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
             >>::Handle,
         >,
     U: Unpin,
-    <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Wrap: Unpin,
-    <<C::Context as UnravelContext<C>>::Target as Fork<
-        <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
+    <<C::Context as ContextReference<C>>::Target as Notify<U>>::Wrap: Unpin,
+    <<C::Context as ContextReference<C>>::Target as Fork<
+        <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
     >>::Target: Unpin,
-    <<C::Context as UnravelContext<C>>::Target as Fork<
-        <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
+    <<C::Context as ContextReference<C>>::Target as Fork<
+        <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
     >>::Future: Unpin,
-    <<C::Context as UnravelContext<C>>::Target as Fork<
-        <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
+    <<C::Context as ContextReference<C>>::Target as Fork<
+        <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
     >>::Finalize: Unpin,
-    <C::Context as UnravelContext<C>>::Target: Unpin,
-    <<C::Context as UnravelContext<C>>::Target as Notify<T>>::Unwrap: Unpin,
-    <<C::Context as UnravelContext<C>>::Target as Join<
-        <<C::Context as UnravelContext<C>>::Target as Notify<T>>::Notification,
+    <C::Context as ContextReference<C>>::Target: Unpin,
+    <<C::Context as ContextReference<C>>::Target as Notify<T>>::Unwrap: Unpin,
+    <<C::Context as ContextReference<C>>::Target as Join<
+        <<C::Context as ContextReference<C>>::Target as Notify<T>>::Notification,
     >>::Future: Unpin,
-    C::Output: Unpin,
+    C::ForkOutput: Unpin,
     C: Unpin,
 {
     type Ok = ErasedFnOnceUnravel<C, T, U, F, M>;
     type Error = FnOnceUnravelError<
-        <<C::Context as UnravelContext<C>>::Target as Read<
-            <<C::Context as UnravelContext<C>>::Target as Dispatch<
-                <<C::Context as UnravelContext<C>>::Target as Notify<T>>::Notification,
+        <<C::Context as ContextReference<C>>::Target as Read<
+            <<C::Context as ContextReference<C>>::Target as Dispatch<
+                <<C::Context as ContextReference<C>>::Target as Notify<T>>::Notification,
             >>::Handle,
         >>::Error,
-        <<<C::Context as UnravelContext<C>>::Target as Notify<T>>::Unwrap as Future<
-            <C::Context as UnravelContext<C>>::Target,
+        <<<C::Context as ContextReference<C>>::Target as Notify<T>>::Unwrap as Future<
+            <C::Context as ContextReference<C>>::Target,
         >>::Error,
-        <<<C::Context as UnravelContext<C>>::Target as Join<
-            <<C::Context as UnravelContext<C>>::Target as Notify<T>>::Notification,
-        >>::Future as Future<<C::Context as UnravelContext<C>>::Target>>::Error,
-        <C::Output as Future<C>>::Error,
+        <<<C::Context as ContextReference<C>>::Target as Join<
+            <<C::Context as ContextReference<C>>::Target as Notify<T>>::Notification,
+        >>::Future as Future<<C::Context as ContextReference<C>>::Target>>::Error,
+        <C::ForkOutput as Future<C>>::Error,
         C::Error,
-        <<C::Context as UnravelContext<C>>::Target as Write<
-            <<C::Context as UnravelContext<C>>::Target as Dispatch<
-                <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
+        <<C::Context as ContextReference<C>>::Target as Write<
+            <<C::Context as ContextReference<C>>::Target as Dispatch<
+                <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
             >>::Handle,
         >>::Error,
-        <<<C::Context as UnravelContext<C>>::Target as Notify<U>>::Wrap as Future<
-            <C::Context as UnravelContext<C>>::Target,
+        <<<C::Context as ContextReference<C>>::Target as Notify<U>>::Wrap as Future<
+            <C::Context as ContextReference<C>>::Target,
         >>::Error,
-        <<<C::Context as UnravelContext<C>>::Target as Fork<
-            <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
-        >>::Future as Future<<C::Context as UnravelContext<C>>::Target>>::Error,
-        <<<C::Context as UnravelContext<C>>::Target as Fork<
-            <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
-        >>::Target as Future<<C::Context as UnravelContext<C>>::Target>>::Error,
-        <<<C::Context as UnravelContext<C>>::Target as Fork<
-            <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
-        >>::Finalize as Future<<C::Context as UnravelContext<C>>::Target>>::Error,
+        <<<C::Context as ContextReference<C>>::Target as Fork<
+            <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
+        >>::Future as Future<<C::Context as ContextReference<C>>::Target>>::Error,
+        <<<C::Context as ContextReference<C>>::Target as Fork<
+            <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
+        >>::Target as Future<<C::Context as ContextReference<C>>::Target>>::Error,
+        <<<C::Context as ContextReference<C>>::Target as Fork<
+            <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
+        >>::Finalize as Future<<C::Context as ContextReference<C>>::Target>>::Error,
     >;
 
     fn poll<R: BorrowMut<C>>(
@@ -499,7 +484,7 @@ where
             if this.call.is_some() {
                 match &mut this.context {
                     FnOnceUnravelState::None(_) => {
-                        this.context = FnOnceUnravelState::Context(ctx.borrow_mut().contextualize())
+                        this.context = FnOnceUnravelState::Context(ctx.borrow_mut().fork_ref())
                     }
                     FnOnceUnravelState::Context(future) => {
                         let (context, handle) = ready!(Pin::new(future).poll(cx, ctx.borrow_mut()))
@@ -534,7 +519,7 @@ where
                     }
                 }
             } else {
-                panic!("FutureUnravel polled after completion")
+                panic!("FnOnceUnravel polled after completion")
             }
         }
     }
@@ -584,14 +569,14 @@ pub struct ErasedFnOnceCoalesce<
 }
 
 impl<
-        T,
-        U,
-        C: Notify<T>
-            + Notify<U>
-            + Write<<C as Dispatch<<C as Notify<T>>::Notification>>::Handle>
-            + Read<<C as Dispatch<<C as Notify<U>>::Notification>>::Handle>
-            + Finalize<<C as Fork<<C as Notify<T>>::Notification>>::Finalize>,
-    > Unpin for ErasedFnOnceCoalesce<T, U, C>
+    T,
+    U,
+    C: Notify<T>
+        + Notify<U>
+        + Write<<C as Dispatch<<C as Notify<T>>::Notification>>::Handle>
+        + Read<<C as Dispatch<<C as Notify<U>>::Notification>>::Handle>
+        + Finalize<<C as Fork<<C as Notify<T>>::Notification>>::Finalize>,
+> Unpin for ErasedFnOnceCoalesce<T, U, C>
 where
     <C as Fork<<C as Notify<T>>::Notification>>::Finalize:
         Future<<C as Finalize<<C as Fork<<C as Notify<T>>::Notification>>::Finalize>>::Target>,
@@ -637,18 +622,18 @@ type CoalesceError<T, U, C> = ErasedFnOnceCoalesceError<
     <<C as Notify<U>>::Unwrap as Future<C>>::Error,
     <<C as Join<<C as Notify<U>>::Notification>>::Future as Future<C>>::Error,
     <<C as Fork<<C as Notify<T>>::Notification>>::Target as Future<C>>::Error,
-    <<C as Finalize<<C as Fork<<C as Notify<T>>::Notification>>::Finalize>>::Output as Future<C>>::Error
+    <<C as Finalize<<C as Fork<<C as Notify<T>>::Notification>>::Finalize>>::Output as Future<C>>::Error,
 >;
 
 impl<
-        T,
-        U,
-        C: Notify<T>
-            + Notify<U>
-            + Write<<C as Dispatch<<C as Notify<T>>::Notification>>::Handle>
-            + Read<<C as Dispatch<<C as Notify<U>>::Notification>>::Handle>
-            + Finalize<<C as Fork<<C as Notify<T>>::Notification>>::Finalize>,
-    > future::Future for ErasedFnOnceCoalesce<T, U, C>
+    T,
+    U,
+    C: Notify<T>
+        + Notify<U>
+        + Write<<C as Dispatch<<C as Notify<T>>::Notification>>::Handle>
+        + Read<<C as Dispatch<<C as Notify<U>>::Notification>>::Handle>
+        + Finalize<<C as Fork<<C as Notify<T>>::Notification>>::Finalize>,
+> future::Future for ErasedFnOnceCoalesce<T, U, C>
 where
     <C as Notify<T>>::Wrap: Unpin,
     <C as Notify<U>>::Unwrap: Unpin,
@@ -658,15 +643,21 @@ where
     <C as Fork<<C as Notify<T>>::Notification>>::Finalize:
         Future<<C as Finalize<<C as Fork<<C as Notify<T>>::Notification>>::Finalize>>::Target>,
     <C as Finalize<<C as Fork<<C as Notify<T>>::Notification>>::Finalize>>::Output: Unpin,
-    <C as Write<<C as Dispatch<<C as Notify<T>>::Notification>>::Handle>>::Error: Error + Send + 'static,
-    <<C as Fork<<C as Notify<T>>::Notification>>::Future as Future<C>>::Error: Error + Send + 'static,
+    <C as Write<<C as Dispatch<<C as Notify<T>>::Notification>>::Handle>>::Error:
+        Error + Send + 'static,
+    <<C as Fork<<C as Notify<T>>::Notification>>::Future as Future<C>>::Error:
+        Error + Send + 'static,
     <<C as Notify<T>>::Wrap as Future<C>>::Error: Error + Send + 'static,
-    <C as Read<<C as Dispatch<<C as Notify<U>>::Notification>>::Handle>>::Error: Error + Send + 'static,
+    <C as Read<<C as Dispatch<<C as Notify<U>>::Notification>>::Handle>>::Error:
+        Error + Send + 'static,
     <<C as Notify<U>>::Unwrap as Future<C>>::Error: Error + Send + 'static,
     <C as Join<<C as Notify<U>>::Notification>>::Future: Unpin,
-    <<C as Join<<C as Notify<U>>::Notification>>::Future as Future<C>>::Error: Error + Send + 'static,
-    <<C as Fork<<C as Notify<T>>::Notification>>::Target as Future<C>>::Error: Error + Send + 'static,
-    <<C as Finalize<<C as Fork<<C as Notify<T>>::Notification>>::Finalize>>::Output as Future<C>>::Error: Error + Send + 'static
+    <<C as Join<<C as Notify<U>>::Notification>>::Future as Future<C>>::Error:
+        Error + Send + 'static,
+    <<C as Fork<<C as Notify<T>>::Notification>>::Target as Future<C>>::Error:
+        Error + Send + 'static,
+    <<C as Finalize<<C as Fork<<C as Notify<T>>::Notification>>::Finalize>>::Output as Future<C>>::Error:
+        Error + Send + 'static,
 {
     type Output = Result<U, ProtocolError>;
 
@@ -682,22 +673,26 @@ where
                     this.state = ErasedFnOnceCoalesceState::Fork(ctx.fork(wrapped));
                 }
                 ErasedFnOnceCoalesceState::Fork(future) => {
-                    let (target, handle) = ready!(Pin::new(future).poll(cx, &mut *ctx)).map_err(|e| ProtocolError::new(CoalesceError::<T, U, C>::Fork(e)))?;
+                    let (target, handle) = ready!(Pin::new(future).poll(cx, &mut *ctx))
+                        .map_err(|e| ProtocolError::new(CoalesceError::<T, U, C>::Fork(e)))?;
                     this.state = ErasedFnOnceCoalesceState::Write(target, handle);
                 }
                 ErasedFnOnceCoalesceState::Write(_, _) => {
                     let mut ctx = Pin::new(&mut *ctx);
-                    ready!(ctx.as_mut().poll_ready(cx)).map_err(|e| ProtocolError::new(CoalesceError::<T, U, C>::Write(e)))?;
+                    ready!(ctx.as_mut().poll_ready(cx))
+                        .map_err(|e| ProtocolError::new(CoalesceError::<T, U, C>::Write(e)))?;
                     let data = replace(&mut this.state, ErasedFnOnceCoalesceState::Done);
                     if let ErasedFnOnceCoalesceState::Write(target, data) = data {
-                        ctx.write(data).map_err(|e| ProtocolError::new(CoalesceError::<T, U, C>::Write(e)))?;
+                        ctx.write(data)
+                            .map_err(|e| ProtocolError::new(CoalesceError::<T, U, C>::Write(e)))?;
                         this.state = ErasedFnOnceCoalesceState::Flush(target);
                     } else {
                         panic!("invalid state in ErasedFnOnceCoalesce Write")
                     }
                 }
                 ErasedFnOnceCoalesceState::Flush(_) => {
-                    ready!(Pin::new(&mut *ctx).poll_ready(cx)).map_err(|e| ProtocolError::new(CoalesceError::<T, U, C>::Write(e)))?;
+                    ready!(Pin::new(&mut *ctx).poll_ready(cx))
+                        .map_err(|e| ProtocolError::new(CoalesceError::<T, U, C>::Write(e)))?;
                     let data = replace(&mut this.state, ErasedFnOnceCoalesceState::Done);
                     if let ErasedFnOnceCoalesceState::Flush(target) = data {
                         this.state = ErasedFnOnceCoalesceState::Target(target);
@@ -706,30 +701,38 @@ where
                     }
                 }
                 ErasedFnOnceCoalesceState::Target(target) => {
-                    let finalize =
-                        ready!(Pin::new(target).poll(cx, &mut *ctx)).map_err(|e| ProtocolError::new(CoalesceError::<T, U, C>::Target(e)))?;
+                    let finalize = ready!(Pin::new(target).poll(cx, &mut *ctx))
+                        .map_err(|e| ProtocolError::new(CoalesceError::<T, U, C>::Target(e)))?;
                     this.state = ErasedFnOnceCoalesceState::Finalize(ctx.finalize(finalize));
                 }
                 ErasedFnOnceCoalesceState::Finalize(future) => {
-                    ready!(Pin::new(future).poll(cx, &mut *ctx)).map_err(|e| ProtocolError::new(CoalesceError::<T, U, C>::Finalize(e)))?;
+                    ready!(Pin::new(future).poll(cx, &mut *ctx))
+                        .map_err(|e| ProtocolError::new(CoalesceError::<T, U, C>::Finalize(e)))?;
                     this.state = ErasedFnOnceCoalesceState::Read;
                 }
                 ErasedFnOnceCoalesceState::Read => {
-                    let handle: <C as Dispatch<<C as Notify<U>>::Notification>>::Handle = ready!(Pin::new(&mut *ctx).read(cx)).map_err(|e| ProtocolError::new(CoalesceError::<T, U, C>::Read(e)))?;
-                    let join: <C as Join<<C as Notify<U>>::Notification>>::Future = Join::<<C as Notify<U>>::Notification>::join(ctx, handle);
+                    let handle: <C as Dispatch<<C as Notify<U>>::Notification>>::Handle =
+                        ready!(Pin::new(&mut *ctx).read(cx))
+                            .map_err(|e| ProtocolError::new(CoalesceError::<T, U, C>::Read(e)))?;
+                    let join: <C as Join<<C as Notify<U>>::Notification>>::Future =
+                        Join::<<C as Notify<U>>::Notification>::join(ctx, handle);
                     this.state = ErasedFnOnceCoalesceState::Join(join);
                 }
                 ErasedFnOnceCoalesceState::Join(future) => {
-                    let wrapped = ready!(Pin::new(future).poll(cx, &mut *ctx)).map_err(|e| ProtocolError::new(CoalesceError::<T, U, C>::Join(e)))?;
+                    let wrapped = ready!(Pin::new(future).poll(cx, &mut *ctx))
+                        .map_err(|e| ProtocolError::new(CoalesceError::<T, U, C>::Join(e)))?;
                     let unwrap: <C as Notify<U>>::Unwrap = Notify::<U>::unwrap(ctx, wrapped);
                     this.state = ErasedFnOnceCoalesceState::Unwrap(unwrap);
                 }
                 ErasedFnOnceCoalesceState::Unwrap(future) => {
-                    let data = ready!(Pin::new(future).poll(cx, &mut *ctx)).map_err(|e| ProtocolError::new(CoalesceError::<T, U, C>::Unwrap(e)))?;
+                    let data = ready!(Pin::new(future).poll(cx, &mut *ctx))
+                        .map_err(|e| ProtocolError::new(CoalesceError::<T, U, C>::Unwrap(e)))?;
                     this.state = ErasedFnOnceCoalesceState::Done;
                     return Poll::Ready(Ok(data));
                 }
-                ErasedFnOnceCoalesceState::Done => panic!("erased FnOnce coalesce polled after completion"),
+                ErasedFnOnceCoalesceState::Done => {
+                    panic!("erased FnOnce coalesce polled after completion")
+                }
             }
         }
     }
@@ -747,14 +750,14 @@ pub struct ErasedFnOnce<T, U, C> {
 }
 
 impl<
-        T,
-        U: Flatten<ProtocolError, ErasedFnOnceCoalesce<T, U, C>>,
-        C: Notify<T>
-            + Notify<U>
-            + Write<<C as Dispatch<<C as Notify<T>>::Notification>>::Handle>
-            + Read<<C as Dispatch<<C as Notify<U>>::Notification>>::Handle>
-            + Finalize<<C as Fork<<C as Notify<T>>::Notification>>::Finalize>,
-    > ErasedFnOnce<T, U, C>
+    T,
+    U: Flatten<ProtocolError, ErasedFnOnceCoalesce<T, U, C>>,
+    C: Notify<T>
+        + Notify<U>
+        + Write<<C as Dispatch<<C as Notify<T>>::Notification>>::Handle>
+        + Read<<C as Dispatch<<C as Notify<U>>::Notification>>::Handle>
+        + Finalize<<C as Fork<<C as Notify<T>>::Notification>>::Finalize>,
+> ErasedFnOnce<T, U, C>
 where
     <C as Notify<T>>::Wrap: Unpin,
     <C as Notify<U>>::Unwrap: Unpin,
@@ -764,15 +767,21 @@ where
     <C as Fork<<C as Notify<T>>::Notification>>::Finalize:
         Future<<C as Finalize<<C as Fork<<C as Notify<T>>::Notification>>::Finalize>>::Target>,
     <C as Finalize<<C as Fork<<C as Notify<T>>::Notification>>::Finalize>>::Output: Unpin,
-    <C as Write<<C as Dispatch<<C as Notify<T>>::Notification>>::Handle>>::Error: Error + Send + 'static,
-    <<C as Fork<<C as Notify<T>>::Notification>>::Future as Future<C>>::Error: Error + Send + 'static,
+    <C as Write<<C as Dispatch<<C as Notify<T>>::Notification>>::Handle>>::Error:
+        Error + Send + 'static,
+    <<C as Fork<<C as Notify<T>>::Notification>>::Future as Future<C>>::Error:
+        Error + Send + 'static,
     <<C as Notify<T>>::Wrap as Future<C>>::Error: Error + Send + 'static,
-    <C as Read<<C as Dispatch<<C as Notify<U>>::Notification>>::Handle>>::Error: Error + Send + 'static,
+    <C as Read<<C as Dispatch<<C as Notify<U>>::Notification>>::Handle>>::Error:
+        Error + Send + 'static,
     <<C as Notify<U>>::Unwrap as Future<C>>::Error: Error + Send + 'static,
-    <<C as Join<<C as Notify<U>>::Notification>>::Future as Future<C>>::Error: Error + Send + 'static,
-    <<C as Fork<<C as Notify<T>>::Notification>>::Target as Future<C>>::Error: Error + Send + 'static,
+    <<C as Join<<C as Notify<U>>::Notification>>::Future as Future<C>>::Error:
+        Error + Send + 'static,
+    <<C as Fork<<C as Notify<T>>::Notification>>::Target as Future<C>>::Error:
+        Error + Send + 'static,
     <C as Join<<C as Notify<U>>::Notification>>::Future: Unpin,
-    <<C as Finalize<<C as Fork<<C as Notify<T>>::Notification>>::Finalize>>::Output as Future<C>>::Error: Error + Send + 'static
+    <<C as Finalize<<C as Fork<<C as Notify<T>>::Notification>>::Finalize>>::Output as Future<C>>::Error:
+        Error + Send + 'static,
 {
     fn call(mut self, args: T) -> U {
         U::flatten(ErasedFnOnceCoalesce {
@@ -801,7 +810,7 @@ pub struct FnOnceCoalesce<
     P: Fn(ErasedFnOnce<T, U, C::Context>) -> O,
     T: Unpin,
     U,
-    C: ?Sized + ContextualizeCoalesce,
+    C: ?Sized + CloneContext,
 > where
     C::Context: Unpin
         + Read<<C::Context as Dispatch<<C::Context as Notify<T>>::Notification>>::Handle>
@@ -811,19 +820,19 @@ pub struct FnOnceCoalesce<
 {
     conv: P,
     lifetime: PhantomData<&'a (O, T, U)>,
-    state: FnOnceCoalesceState<C::Output>,
+    state: FnOnceCoalesceState<C::JoinOutput>,
 }
 
 impl<
-        'a,
-        O,
-        P: Fn(ErasedFnOnce<T, U, C::Context>) -> O,
-        T: Unpin,
-        U,
-        C: ?Sized + Read<<C as Contextualizer>::Handle> + ContextualizeCoalesce,
-    > Future<C> for FnOnceCoalesce<'a, O, P, T, U, C>
+    'a,
+    O,
+    P: Fn(ErasedFnOnce<T, U, C::Context>) -> O,
+    T: Unpin,
+    U,
+    C: ?Sized + Read<<C as Contextualize>::Handle> + CloneContext,
+> Future<C> for FnOnceCoalesce<'a, O, P, T, U, C>
 where
-    C::Output: Unpin,
+    C::JoinOutput: Unpin,
     C: Unpin,
     C::Context: Unpin,
     P: Unpin,
@@ -834,7 +843,7 @@ where
     <C::Context as Fork<<C::Context as Notify<T>>::Notification>>::Future: Unpin,
 {
     type Ok = O;
-    type Error = FnOnceCoalesceError<<C::Output as Future<C>>::Error, C::Error>;
+    type Error = FnOnceCoalesceError<<C::JoinOutput as Future<C>>::Error, C::Error>;
 
     fn poll<R: BorrowMut<C>>(
         mut self: Pin<&mut Self>,
@@ -853,7 +862,7 @@ where
                 FnOnceCoalesceState::Read => {
                     let ct = Pin::new(&mut *ctx);
                     let handle = ready!(ct.read(cx)).map_err(FnOnceCoalesceError::Read)?;
-                    this.state = FnOnceCoalesceState::Contextualize(ctx.contextualize(handle));
+                    this.state = FnOnceCoalesceState::Contextualize(ctx.join_owned(handle));
                 }
                 FnOnceCoalesceState::Contextualize(future) => {
                     let context = ready!(Pin::new(future).poll(cx, &mut *ctx))
@@ -879,37 +888,37 @@ macro_rules! tuple_impls {
                 'a,
                 $($name: 'a,)*
                 U: 'a,
-                C: ?Sized + Write<<C as Contextualizer>::Handle> + ContextualizeUnravel + Unpin,
+                C: ?Sized + Write<<C as Contextualize>::Handle> + ReferenceContext + Unpin,
             > Unravel<C> for Box<dyn FnOnce($($name,)*) -> U + 'a $(+ $marker)*>
             where
-                <C::Context as UnravelContext<C>>::Target: Notify<($($name,)*)>
+                <C::Context as ContextReference<C>>::Target: Notify<($($name,)*)>
                     + Notify<U>
                     + Read<
-                        <<C::Context as UnravelContext<C>>::Target as Dispatch<
-                            <<C::Context as UnravelContext<C>>::Target as Notify<($($name,)*)>>::Notification,
+                        <<C::Context as ContextReference<C>>::Target as Dispatch<
+                            <<C::Context as ContextReference<C>>::Target as Notify<($($name,)*)>>::Notification,
                         >>::Handle,
                     > + Write<
-                        <<C::Context as UnravelContext<C>>::Target as Dispatch<
-                            <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
+                        <<C::Context as ContextReference<C>>::Target as Dispatch<
+                            <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
                         >>::Handle,
                     >,
                 U: Unpin,
-                <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Wrap: Unpin,
-                <<C::Context as UnravelContext<C>>::Target as Fork<
-                    <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
+                <<C::Context as ContextReference<C>>::Target as Notify<U>>::Wrap: Unpin,
+                <<C::Context as ContextReference<C>>::Target as Fork<
+                    <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
                 >>::Target: Unpin,
-                <<C::Context as UnravelContext<C>>::Target as Fork<
-                    <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
+                <<C::Context as ContextReference<C>>::Target as Fork<
+                    <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
                 >>::Future: Unpin,
-                <<C::Context as UnravelContext<C>>::Target as Fork<
-                    <<C::Context as UnravelContext<C>>::Target as Notify<U>>::Notification,
+                <<C::Context as ContextReference<C>>::Target as Fork<
+                    <<C::Context as ContextReference<C>>::Target as Notify<U>>::Notification,
                 >>::Finalize: Unpin,
-                <C::Context as UnravelContext<C>>::Target: Unpin,
-                <<C::Context as UnravelContext<C>>::Target as Notify<($($name,)*)>>::Unwrap: Unpin,
-                <<C::Context as UnravelContext<C>>::Target as Join<
-                    <<C::Context as UnravelContext<C>>::Target as Notify<($($name,)*)>>::Notification,
+                <C::Context as ContextReference<C>>::Target: Unpin,
+                <<C::Context as ContextReference<C>>::Target as Notify<($($name,)*)>>::Unwrap: Unpin,
+                <<C::Context as ContextReference<C>>::Target as Join<
+                    <<C::Context as ContextReference<C>>::Target as Notify<($($name,)*)>>::Notification,
                 >>::Future: Unpin,
-                C::Output: Unpin,
+                C::ForkOutput: Unpin,
                 C: Unpin,
             {
                 type Finalize = ErasedFnOnceUnravel<
@@ -941,11 +950,11 @@ macro_rules! tuple_impls {
                     'a,
                     $($name: Unpin + 'a,)*
                     U: Flatten<ProtocolError, ErasedFnOnceCoalesce<($($name,)*), U, C::Context>> + 'a $(+ $marker)*,
-                    C: Read<<C as Contextualizer>::Handle> + ContextualizeCoalesce,
+                    C: Read<<C as Contextualize>::Handle> + CloneContext,
                 > Coalesce<C> for Box<dyn FnOnce($($name,)*) -> U + 'a $(+ $marker)*>
             where
                 ($($name,)*): 'a $(+ $marker)*,
-                C::Output: Unpin,
+                C::JoinOutput: Unpin,
                 C: Unpin,
                 C::Context: 'a $(+ $marker)*,
                 <C::Context as Notify<($($name,)*)>>::Wrap: Unpin,
@@ -1025,15 +1034,4 @@ marker_variants! {
     Sync,
     Send, Sync Send,
     Unpin, Sync Unpin, Send Unpin, Sync Send Unpin
-}
-
-#[cfg(feature = "std")]
-mod standard {
-    use super::*;
-    use std::panic::{RefUnwindSafe, UnwindSafe};
-
-    marker_variants! {
-        UnwindSafe, Sync UnwindSafe, Send UnwindSafe, Sync Send UnwindSafe, Unpin UnwindSafe, Sync Unpin UnwindSafe, Send Unpin UnwindSafe, Sync Send Unpin UnwindSafe,
-        RefUnwindSafe, Sync RefUnwindSafe, Send RefUnwindSafe, Sync Send RefUnwindSafe, Unpin RefUnwindSafe, Sync Unpin RefUnwindSafe, Send Unpin RefUnwindSafe, Sync Send Unpin RefUnwindSafe, UnwindSafe RefUnwindSafe, Sync UnwindSafe RefUnwindSafe, Send UnwindSafe RefUnwindSafe, Sync Send UnwindSafe RefUnwindSafe, Unpin UnwindSafe RefUnwindSafe, Sync Unpin UnwindSafe RefUnwindSafe, Send Unpin UnwindSafe RefUnwindSafe, Sync Send Unpin UnwindSafe RefUnwindSafe
-    }
 }

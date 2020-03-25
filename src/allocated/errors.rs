@@ -206,18 +206,18 @@ where
 }
 
 impl<
-        T,
-        F: FnMut(ErasedError) -> T,
-        C: ?Sized + Read<<C as Dispatch<ErrorData>>::Handle> + Join<ErrorData> + Unpin,
-    > Unpin for ErrorCoalesce<T, F, C>
+    T,
+    F: FnMut(ErasedError) -> T,
+    C: ?Sized + Read<<C as Dispatch<ErrorData>>::Handle> + Join<ErrorData> + Unpin,
+> Unpin for ErrorCoalesce<T, F, C>
 {
 }
 
 impl<
-        T,
-        F: FnMut(ErasedError) -> T,
-        C: ?Sized + Read<<C as Dispatch<ErrorData>>::Handle> + Join<ErrorData> + Unpin,
-    > Future<C> for ErrorCoalesce<T, F, C>
+    T,
+    F: FnMut(ErasedError) -> T,
+    C: ?Sized + Read<<C as Dispatch<ErrorData>>::Handle> + Join<ErrorData> + Unpin,
+> Future<C> for ErrorCoalesce<T, F, C>
 where
     C::Future: Unpin,
     C::Handle: Unpin,
@@ -308,15 +308,4 @@ marker_variants! {
     Sync,
     Send, Sync Send,
     Unpin, Sync Unpin, Send Unpin, Sync Send Unpin
-}
-
-#[cfg(feature = "std")]
-mod standard {
-    use super::*;
-    use std::panic::{RefUnwindSafe, UnwindSafe};
-
-    marker_variants! {
-        UnwindSafe, Sync UnwindSafe, Send UnwindSafe, Sync Send UnwindSafe, Unpin UnwindSafe, Sync Unpin UnwindSafe, Send Unpin UnwindSafe, Sync Send Unpin UnwindSafe,
-        RefUnwindSafe, Sync RefUnwindSafe, Send RefUnwindSafe, Sync Send RefUnwindSafe, Unpin RefUnwindSafe, Sync Unpin RefUnwindSafe, Send Unpin RefUnwindSafe, Sync Send Unpin RefUnwindSafe, UnwindSafe RefUnwindSafe, Sync UnwindSafe RefUnwindSafe, Send UnwindSafe RefUnwindSafe, Sync Send UnwindSafe RefUnwindSafe, Unpin UnwindSafe RefUnwindSafe, Sync Unpin UnwindSafe RefUnwindSafe, Send Unpin UnwindSafe RefUnwindSafe, Sync Send Unpin UnwindSafe RefUnwindSafe
-    }
 }
