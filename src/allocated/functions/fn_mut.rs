@@ -3,7 +3,7 @@ use crate::{
     CloneContext, Coalesce, ContextReference, Contextualize, Dispatch, Finalize, FinalizeImmediate,
     Fork, Future, Join, Notify, Read, ReferenceContext, ShareContext, Unravel, Write,
 };
-use alloc::{vec, boxed::Box, vec::Vec};
+use alloc::{boxed::Box, vec, vec::Vec};
 use core::{
     borrow::BorrowMut,
     future,
@@ -438,7 +438,7 @@ where
                     }
                 }
                 ErasedFnMutUnravelInstanceState::Flush(_) => {
-                    ready!(Pin::new(&mut *ctx).poll_ready(cx))
+                    ready!(Pin::new(&mut *ctx).poll_flush(cx))
                         .map_err(FnMutUnravelError::Transport)?;
                     let data = replace(&mut this.state, ErasedFnMutUnravelInstanceState::Done);
                     if let ErasedFnMutUnravelInstanceState::Flush(target) = data {
@@ -1297,6 +1297,8 @@ where
                         }
                     }
                     FnMutUnravelState::Flush(_) => {
+                        let mut ctx = Pin::new(ctx.borrow_mut());
+                        ready!(ctx.as_mut().poll_flush(cx)).map_err(FnMutUnravelError::Write)?;
                         let data = replace(&mut this.context, FnMutUnravelState::None(PhantomData));
                         if let FnMutUnravelState::Flush(context) = data {
                             return Poll::Ready(Ok(ErasedFnMutUnravel {
@@ -2153,6 +2155,5 @@ marker_variants! {
     ,
     Unpin,
     Sync,
-    Send, Sync Send,
-    Sync Unpin, Send Unpin, Sync Send Unpin
+    Send, Sync Send
 }

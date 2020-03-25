@@ -267,7 +267,7 @@ where
                     }
                 }
                 ErasedFnOnceUnravelState::Flush(_) => {
-                    ready!(Pin::new(&mut *ctx).poll_ready(cx))
+                    ready!(Pin::new(&mut *ctx).poll_flush(cx))
                         .map_err(FnOnceUnravelError::Transport)?;
                     let data = replace(&mut this.state, ErasedFnOnceUnravelState::Done);
                     if let ErasedFnOnceUnravelState::Flush(target) = data {
@@ -504,6 +504,8 @@ where
                         }
                     }
                     FnOnceUnravelState::Flush(_) => {
+                        let mut ctx = Pin::new(ctx.borrow_mut());
+                        ready!(ctx.as_mut().poll_flush(cx)).map_err(FnOnceUnravelError::Write)?;
                         let data =
                             replace(&mut this.context, FnOnceUnravelState::None(PhantomData));
                         if let FnOnceUnravelState::Flush(context) = data {
@@ -1032,6 +1034,5 @@ macro_rules! marker_variants {
 marker_variants! {
     ,
     Sync,
-    Send, Sync Send,
-    Unpin, Sync Unpin, Send Unpin, Sync Send Unpin
+    Send, Sync Send
 }

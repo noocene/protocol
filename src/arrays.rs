@@ -349,7 +349,7 @@ where
                     }
                 }
                 Array0001Unravel::Flush(_) => {
-                    ready!(Pin::new(&mut *ctx).poll_ready(cx))
+                    ready!(Pin::new(&mut *ctx).poll_flush(cx))
                         .map_err(ArrayUnravelError::Transport)?;
                     let data = replace(this, Array0001Unravel::Done);
                     if let Array0001Unravel::Flush(target) = data {

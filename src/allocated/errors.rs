@@ -184,7 +184,7 @@ where
                     }
                 }
                 ErrorUnravel::Flush(_) => {
-                    ready!(Pin::new(&mut *ctx).poll_ready(cx))
+                    ready!(Pin::new(&mut *ctx).poll_flush(cx))
                         .map_err(ErrorUnravelError::Transport)?;
                     let data = replace(this, ErrorUnravel::Done);
                     if let ErrorUnravel::Flush(target) = data {
@@ -306,6 +306,5 @@ macro_rules! marker_variants {
 marker_variants! {
     ,
     Sync,
-    Send, Sync Send,
-    Unpin, Sync Unpin, Send Unpin, Sync Send Unpin
+    Send, Sync Send
 }

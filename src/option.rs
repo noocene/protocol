@@ -142,7 +142,7 @@ where
                     }
                 }
                 OptionUnravel::Flush(_) => {
-                    ready!(Pin::new(&mut *ctx).poll_ready(cx))
+                    ready!(Pin::new(&mut *ctx).poll_flush(cx))
                         .map_err(OptionUnravelError::Transport)?;
                     let data = replace(this, OptionUnravel::Done);
                     if let OptionUnravel::Flush(target) = data {

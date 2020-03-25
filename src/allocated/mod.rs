@@ -1,6 +1,7 @@
 mod errors;
 mod functions;
 mod futures;
+mod streams;
 mod vec;
 use alloc::boxed::Box;
 use core::{

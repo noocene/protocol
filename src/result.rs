@@ -60,14 +60,14 @@ pub enum ResultCoalesce<
 }
 
 impl<
-        T: Unpin,
-        E: Unpin,
-        C: ?Sized
-            + Write<Result<<C as Dispatch<T>>::Handle, <C as Dispatch<E>>::Handle>>
-            + Fork<T>
-            + Fork<E>
-            + Unpin,
-    > From<Result<T, E>> for ResultUnravel<T, E, C>
+    T: Unpin,
+    E: Unpin,
+    C: ?Sized
+        + Write<Result<<C as Dispatch<T>>::Handle, <C as Dispatch<E>>::Handle>>
+        + Fork<T>
+        + Fork<E>
+        + Unpin,
+> From<Result<T, E>> for ResultUnravel<T, E, C>
 {
     fn from(data: Result<T, E>) -> Self {
         match data {
@@ -122,14 +122,14 @@ pub enum ResultUnravelError<T, E, U, V, W, X, Y> {
 }
 
 impl<
-        T: Unpin,
-        E: Unpin,
-        C: ?Sized
-            + Write<Result<<C as Dispatch<T>>::Handle, <C as Dispatch<E>>::Handle>>
-            + Fork<T>
-            + Fork<E>
-            + Unpin,
-    > Future<C> for ResultUnravel<T, E, C>
+    T: Unpin,
+    E: Unpin,
+    C: ?Sized
+        + Write<Result<<C as Dispatch<T>>::Handle, <C as Dispatch<E>>::Handle>>
+        + Fork<T>
+        + Fork<E>
+        + Unpin,
+> Future<C> for ResultUnravel<T, E, C>
 where
     <C as Fork<T>>::Future: Unpin,
     <C as Fork<E>>::Future: Unpin,
@@ -213,7 +213,7 @@ where
                     }
                 }
                 ResultUnravel::OkFlush(_) => {
-                    ready!(Pin::new(&mut *ctx).poll_ready(cx))
+                    ready!(Pin::new(&mut *ctx).poll_flush(cx))
                         .map_err(ResultUnravelError::Transport)?;
                     let data = replace(this, ResultUnravel::Done);
                     if let ResultUnravel::OkFlush(target) = data {
@@ -223,7 +223,7 @@ where
                     }
                 }
                 ResultUnravel::ErrFlush(_) => {
-                    ready!(Pin::new(&mut *ctx).poll_ready(cx))
+                    ready!(Pin::new(&mut *ctx).poll_flush(cx))
                         .map_err(ResultUnravelError::Transport)?;
                     let data = replace(this, ResultUnravel::Done);
                     if let ResultUnravel::ErrFlush(target) = data {
@@ -255,14 +255,14 @@ where
 }
 
 impl<
-        T: Unpin,
-        E: Unpin,
-        C: ?Sized
-            + Read<Result<<C as Dispatch<T>>::Handle, <C as Dispatch<E>>::Handle>>
-            + Join<T>
-            + Join<E>
-            + Unpin,
-    > Future<C> for ResultCoalesce<T, E, C>
+    T: Unpin,
+    E: Unpin,
+    C: ?Sized
+        + Read<Result<<C as Dispatch<T>>::Handle, <C as Dispatch<E>>::Handle>>
+        + Join<T>
+        + Join<E>
+        + Unpin,
+> Future<C> for ResultCoalesce<T, E, C>
 where
     <C as Join<T>>::Future: Unpin,
     <C as Join<E>>::Future: Unpin,
@@ -319,14 +319,14 @@ where
 }
 
 impl<
-        T: Unpin,
-        E: Unpin,
-        C: ?Sized
-            + Write<Result<<C as Dispatch<T>>::Handle, <C as Dispatch<E>>::Handle>>
-            + Fork<T>
-            + Fork<E>
-            + Unpin,
-    > Unravel<C> for Result<T, E>
+    T: Unpin,
+    E: Unpin,
+    C: ?Sized
+        + Write<Result<<C as Dispatch<T>>::Handle, <C as Dispatch<E>>::Handle>>
+        + Fork<T>
+        + Fork<E>
+        + Unpin,
+> Unravel<C> for Result<T, E>
 where
     <C as Fork<T>>::Future: Unpin,
     <C as Fork<E>>::Future: Unpin,
@@ -355,14 +355,14 @@ where
 }
 
 impl<
-        T: Unpin,
-        E: Unpin,
-        C: ?Sized
-            + Read<Result<<C as Dispatch<T>>::Handle, <C as Dispatch<E>>::Handle>>
-            + Join<T>
-            + Join<E>
-            + Unpin,
-    > Coalesce<C> for Result<T, E>
+    T: Unpin,
+    E: Unpin,
+    C: ?Sized
+        + Read<Result<<C as Dispatch<T>>::Handle, <C as Dispatch<E>>::Handle>>
+        + Join<T>
+        + Join<E>
+        + Unpin,
+> Coalesce<C> for Result<T, E>
 where
     <C as Join<T>>::Future: Unpin,
     <C as Join<E>>::Future: Unpin,

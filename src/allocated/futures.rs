@@ -237,6 +237,8 @@ where
                         }
                     }
                     FutureUnravelState::Flush(_) => {
+                        let mut ctx = Pin::new(ctx.borrow_mut());
+                        ready!(ctx.as_mut().poll_flush(cx)).map_err(FutureUnravelError::Write)?;
                         let data =
                             replace(&mut this.context, FutureUnravelState::None(PhantomData));
                         if let FutureUnravelState::Flush(context) = data {
@@ -604,6 +606,5 @@ macro_rules! marker_variants {
 marker_variants! {
     ,
     Sync,
-    Send, Sync Send,
-    Unpin, Sync Unpin, Send Unpin, Sync Send Unpin
+    Send, Sync Send
 }

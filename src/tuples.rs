@@ -966,7 +966,7 @@ where
                     }
                 }
                 Tuple1Unravel::Flush(_) => {
-                    ready!(Pin::new(&mut *ctx).poll_ready(cx))
+                    ready!(Pin::new(&mut *ctx).poll_flush(cx))
                         .map_err(Tuple1UnravelError::Transport)?;
                     let data = replace(this, Tuple1Unravel::Done);
                     if let Tuple1Unravel::Flush(target) = data {
