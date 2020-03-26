@@ -1307,6 +1307,12 @@ macro_rules! marker_variants {
                     }
                 }
             }
+
+            impl<'a, E, U: FromError<E> + 'a $(+ $marker)*> FromError<E> for Pin<Box<dyn Stream<Item = U> + 'a $(+ $marker)*>> {
+                fn from_error(error: E) -> Self {
+                    Box::pin(once(ready(U::from_error(error))))
+                }
+            }
         )*
     };
 }
