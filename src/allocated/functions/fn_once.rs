@@ -952,7 +952,7 @@ macro_rules! tuple_impls {
                     'a,
                     $($name: Unpin + 'a,)*
                     U: Flatten<ProtocolError, ErasedFnOnceCoalesce<($($name,)*), U, C::Context>> + 'a $(+ $marker)*,
-                    C: Read<<C as Contextualize>::Handle> + CloneContext,
+                    C: ?Sized + Read<<C as Contextualize>::Handle> + CloneContext,
                 > Coalesce<C> for Box<dyn FnOnce($($name,)*) -> U + 'a $(+ $marker)*>
             where
                 ($($name,)*): 'a $(+ $marker)*,

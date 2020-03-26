@@ -14,7 +14,7 @@ pub struct PrimitiveUnravel<T> {
     data: Option<T>,
 }
 
-impl<T: Unpin, C: Unpin + Write<T>> Future<C> for PrimitiveUnravel<T> {
+impl<T: Unpin, C: ?Sized + Unpin + Write<T>> Future<C> for PrimitiveUnravel<T> {
     type Ok = Ready<(), <C as Write<T>>::Error>;
     type Error = <C as Write<T>>::Error;
 
@@ -50,7 +50,7 @@ pub struct PrimitiveCoalesce<T> {
     data: PhantomData<T>,
 }
 
-impl<T: Unpin, C: Unpin + Read<T>> Future<C> for PrimitiveCoalesce<T> {
+impl<T: Unpin, C: ?Sized + Unpin + Read<T>> Future<C> for PrimitiveCoalesce<T> {
     type Ok = T;
     type Error = <C as Read<T>>::Error;
 
@@ -68,7 +68,7 @@ impl<T: Unpin, C: Unpin + Read<T>> Future<C> for PrimitiveCoalesce<T> {
 macro_rules! impl_primitives {
     ($($ty:ty)+) => {
         $(
-            impl<C: Unpin + Write<Self>> Unravel<C> for $ty {
+            impl<C: ?Sized + Unpin + Write<Self>> Unravel<C> for $ty {
                 type Finalize = Ready<(), C::Error>;
                 type Target = PrimitiveUnravel<Self>;
 
@@ -77,7 +77,7 @@ macro_rules! impl_primitives {
                 }
             }
 
-            impl<C: Unpin + Read<Self>> Coalesce<C> for $ty {
+            impl<C: ?Sized + Unpin + Read<Self>> Coalesce<C> for $ty {
                 type Future = PrimitiveCoalesce<Self>;
 
                 fn coalesce() -> Self::Future {
@@ -98,7 +98,7 @@ mod allocated {
     impl_primitives!(String);
 }
 
-impl<C: Unpin + Write<Self>> Unravel<C> for () {
+impl<C: ?Sized + Unpin + Write<Self>> Unravel<C> for () {
     type Finalize = Ready<()>;
     type Target = Ready<Ready<()>>;
 
@@ -107,7 +107,7 @@ impl<C: Unpin + Write<Self>> Unravel<C> for () {
     }
 }
 
-impl<C: Unpin + Read<Self>> Coalesce<C> for () {
+impl<C: ?Sized + Unpin + Read<Self>> Coalesce<C> for () {
     type Future = Ready<()>;
 
     fn coalesce() -> Self::Future {
@@ -115,7 +115,7 @@ impl<C: Unpin + Read<Self>> Coalesce<C> for () {
     }
 }
 
-impl<T: Unpin + ?Sized, C: Unpin + Write<Self>> Unravel<C> for PhantomData<T> {
+impl<T: Unpin + ?Sized, C: ?Sized + Unpin + Write<Self>> Unravel<C> for PhantomData<T> {
     type Finalize = Ready<()>;
     type Target = Ready<Ready<()>>;
 
@@ -124,7 +124,7 @@ impl<T: Unpin + ?Sized, C: Unpin + Write<Self>> Unravel<C> for PhantomData<T> {
     }
 }
 
-impl<T: Unpin + ?Sized, C: Unpin + Read<Self>> Coalesce<C> for PhantomData<T> {
+impl<T: Unpin + ?Sized, C: ?Sized + Unpin + Read<Self>> Coalesce<C> for PhantomData<T> {
     type Future = Ready<PhantomData<T>>;
 
     fn coalesce() -> Self::Future {
@@ -132,7 +132,7 @@ impl<T: Unpin + ?Sized, C: Unpin + Read<Self>> Coalesce<C> for PhantomData<T> {
     }
 }
 
-impl<T: Unpin, C: Unpin + Write<Self>> Unravel<C> for [T; 0] {
+impl<T: Unpin, C: ?Sized + Unpin + Write<Self>> Unravel<C> for [T; 0] {
     type Finalize = Ready<()>;
     type Target = Ready<Ready<()>>;
 
@@ -141,7 +141,7 @@ impl<T: Unpin, C: Unpin + Write<Self>> Unravel<C> for [T; 0] {
     }
 }
 
-impl<T: Unpin, C: Unpin + Read<Self>> Coalesce<C> for [T; 0] {
+impl<T: Unpin, C: ?Sized + Unpin + Read<Self>> Coalesce<C> for [T; 0] {
     type Future = Ready<[T; 0]>;
 
     fn coalesce() -> Self::Future {

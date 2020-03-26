@@ -514,7 +514,7 @@ macro_rules! marker_variants {
         $($marker:ident)*
     ),+) => {
         $(
-            impl<'a, T: Unpin + FromError<ProtocolError> + 'a, C: Read<<C as Contextualize>::Handle> + CloneContext + 'a $(+ $marker)*> Coalesce<C> for Pin<Box<dyn future::Future<Output = T> + 'a $(+ $marker)*>>
+            impl<'a, T: Unpin + FromError<ProtocolError> + 'a, C: ?Sized + Read<<C as Contextualize>::Handle> + CloneContext + 'a $(+ $marker)*> Coalesce<C> for Pin<Box<dyn future::Future<Output = T> + 'a $(+ $marker)*>>
             where
                 C::JoinOutput: Unpin,
                 C: Unpin,
@@ -528,7 +528,7 @@ macro_rules! marker_variants {
                 type Future = FutureCoalesce<'a, Self, fn(ErasedFutureCoalesce<T, C::Context>) -> Self, T, C>;
 
                 fn coalesce() -> Self::Future {
-                    fn conv<'a, T: Unpin + FromError<ProtocolError> + 'a, C: CloneContext + 'a $(+ $marker)*>(
+                    fn conv<'a, T: Unpin + FromError<ProtocolError> + 'a, C: ?Sized + CloneContext + 'a $(+ $marker)*>(
                         fut: ErasedFutureCoalesce<T, C::Context>,
                     ) -> Pin<Box<dyn future::Future<Output = T> + 'a $(+ $marker)*>>
                     where
