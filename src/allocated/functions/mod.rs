@@ -2157,7 +2157,6 @@ macro_rules! marker_variants {
 
 marker_variants! {
     ,
-    Unpin,
     Sync,
     Send, Sync Send
 }

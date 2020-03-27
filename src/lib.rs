@@ -8,6 +8,8 @@ use core::{
     pin::Pin,
     task::{Context as FContext, Poll},
 };
+use thiserror::Error;
+
 mod arrays;
 pub mod future;
 pub use future::{Future, FutureExt};
@@ -16,10 +18,17 @@ mod primitives;
 mod result;
 mod tuples;
 
+pub use derive::protocol;
+pub use tuples::{FlatCoalesce, FlatUnravel};
+
 #[cfg(feature = "alloc")]
 pub mod allocated;
 #[cfg(feature = "alloc")]
 pub use allocated::ProtocolError;
+
+#[derive(Debug, Error)]
+#[error("attempted to coalesce bottom type {0}")]
+pub struct BottomCoalesce(pub &'static str);
 
 pub trait Notify<T>:
     Fork<<Self as Notify<T>>::Notification> + Join<<Self as Notify<T>>::Notification>

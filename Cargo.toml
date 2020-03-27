@@ -4,12 +4,16 @@ version = "0.1.0"
 authors = ["Izzy Swart <zenerboson@gmail.com>"]
 edition = "2018"
 
+[workspace]
+members = ["./derive"]
+
 [dependencies]
 void = { version = "1.0.2", default-features = false }
 futures = { version = "0.3.4", default-features = false }
 arrayvec = { version = "0.5.1", default-features = false }
 core-error = { git = "https://github.com/core-error/core-error", default-features = false }
 thiserror = { git = "https://github.com/noocene/thiserror", default-features = false }
+derive = { path = "./derive" }
 
 [features]
 default = ["std", "alloc"]

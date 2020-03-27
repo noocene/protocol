@@ -1,7 +1,7 @@
 use crate::{
     future::{
         finalize::{EventualFinalize, EventualFinalizeError, TupleFinalizeInner},
-        Finalize, FutureExt, MapErr,
+        Finalize, FutureExt, MapErr, MapOk,
     },
     Coalesce, Dispatch, Fork, Future, Join, Read, Unravel, Write,
 };
@@ -863,7 +863,7 @@ where
     }
 }
 
-pub enum Tuple1Unravel<T: Unpin, C: ?Sized + Write<<C as Dispatch<T>>::Handle> + Fork<T> + Unpin> {
+pub enum FlatUnravelState<T, C: ?Sized + Write<<C as Dispatch<T>>::Handle> + Fork<T> + Unpin> {
     Data(T),
     Fork(C::Future),
     Write(C::Handle, C::Target),
@@ -872,10 +872,44 @@ pub enum Tuple1Unravel<T: Unpin, C: ?Sized + Write<<C as Dispatch<T>>::Handle> +
     Done,
 }
 
-pub enum Tuple1Coalesce<T: Unpin, C: ?Sized + Read<<C as Dispatch<T>>::Handle> + Join<T> + Unpin> {
+pub struct FlatUnravel<T, C: ?Sized + Write<<C as Dispatch<T>>::Handle> + Fork<T> + Unpin> {
+    state: FlatUnravelState<T, C>,
+}
+
+impl<T, C: ?Sized + Write<<C as Dispatch<T>>::Handle> + Fork<T> + Unpin> Unpin
+    for FlatUnravel<T, C>
+{
+}
+
+impl<T, C: ?Sized + Write<<C as Dispatch<T>>::Handle> + Fork<T> + Unpin> FlatUnravel<T, C> {
+    pub fn new(item: T) -> Self {
+        FlatUnravel {
+            state: FlatUnravelState::Data(item),
+        }
+    }
+}
+
+pub enum FlatCoalesceState<T, C: ?Sized + Read<<C as Dispatch<T>>::Handle> + Join<T> + Unpin> {
     Read,
     Join(<C as Join<T>>::Future),
     Done,
+}
+
+impl<T, C: ?Sized + Read<<C as Dispatch<T>>::Handle> + Join<T> + Unpin> Unpin
+    for FlatCoalesce<T, C>
+{
+}
+
+pub struct FlatCoalesce<T, C: ?Sized + Read<<C as Dispatch<T>>::Handle> + Join<T> + Unpin> {
+    state: FlatCoalesceState<T, C>,
+}
+
+impl<T, C: ?Sized + Read<<C as Dispatch<T>>::Handle> + Join<T> + Unpin> FlatCoalesce<T, C> {
+    pub fn new() -> Self {
+        FlatCoalesce {
+            state: FlatCoalesceState::Read,
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -885,7 +919,7 @@ pub enum Tuple1Coalesce<T: Unpin, C: ?Sized + Read<<C as Dispatch<T>>::Handle> +
         U: Error + 'static,
         V: Error + 'static,
 )]
-pub enum Tuple1UnravelError<T, U, V> {
+pub enum FlatUnravelError<T, U, V> {
     #[error("failed to write handle for tuple: {0}")]
     Transport(#[source] T),
     #[error("failed to fork element in tuple: {0}")]
@@ -900,15 +934,15 @@ pub enum Tuple1UnravelError<T, U, V> {
         T: Error + 'static,
         U: Error + 'static,
 )]
-pub enum Tuple1CoalesceError<T, U> {
+pub enum FlatCoalesceError<T, U> {
     #[error("failed to read handle for tuple: {0}")]
     Transport(#[source] T),
     #[error("failed to join element in tuple: {0}")]
     Dispatch(#[source] U),
 }
 
-impl<T: Unpin, C: ?Sized + Write<<C as Dispatch<T>>::Handle> + Fork<T> + Unpin> Future<C>
-    for Tuple1Unravel<T, C>
+impl<T, C: ?Sized + Write<<C as Dispatch<T>>::Handle> + Fork<T> + Unpin> Future<C>
+    for FlatUnravel<T, C>
 where
     C::Future: Unpin,
     C::Target: Unpin,
@@ -918,13 +952,13 @@ where
         C::Finalize,
         fn(
             <C::Finalize as Future<C>>::Error,
-        ) -> Tuple1UnravelError<
+        ) -> FlatUnravelError<
             C::Error,
             <C::Future as Future<C>>::Error,
             <C::Target as Future<C>>::Error,
         >,
     >;
-    type Error = Tuple1UnravelError<
+    type Error = FlatUnravelError<
         C::Error,
         <C::Future as Future<C>>::Error,
         <C::Target as Future<C>>::Error,
@@ -940,61 +974,61 @@ where
         let this = &mut *self;
 
         loop {
-            match this {
-                Tuple1Unravel::Data(_) => {
-                    let data = replace(this, Tuple1Unravel::Done);
-                    if let Tuple1Unravel::Data(data) = data {
-                        replace(this, Tuple1Unravel::Fork(ctx.fork(data)));
+            match &mut this.state {
+                FlatUnravelState::Data(_) => {
+                    let data = replace(&mut this.state, FlatUnravelState::Done);
+                    if let FlatUnravelState::Data(data) = data {
+                        replace(&mut this.state, FlatUnravelState::Fork(ctx.fork(data)));
                     } else {
-                        panic!("invalid state in Tuple1Unravel Data")
+                        panic!("invalid state in FlatUnravel Data")
                     }
                 }
-                Tuple1Unravel::Fork(future) => {
+                FlatUnravelState::Fork(future) => {
                     let (target, handle) = ready!(Pin::new(&mut *future).poll(cx, &mut *ctx))
-                        .map_err(Tuple1UnravelError::Dispatch)?;
-                    replace(this, Tuple1Unravel::Write(handle, target));
+                        .map_err(FlatUnravelError::Dispatch)?;
+                    replace(&mut this.state, FlatUnravelState::Write(handle, target));
                 }
-                Tuple1Unravel::Write(_, _) => {
+                FlatUnravelState::Write(_, _) => {
                     let mut ctx = Pin::new(&mut *ctx);
-                    ready!(ctx.as_mut().poll_ready(cx)).map_err(Tuple1UnravelError::Transport)?;
-                    let data = replace(this, Tuple1Unravel::Done);
-                    if let Tuple1Unravel::Write(data, target) = data {
-                        ctx.write(data).map_err(Tuple1UnravelError::Transport)?;
-                        replace(this, Tuple1Unravel::Flush(target));
+                    ready!(ctx.as_mut().poll_ready(cx)).map_err(FlatUnravelError::Transport)?;
+                    let data = replace(&mut this.state, FlatUnravelState::Done);
+                    if let FlatUnravelState::Write(data, target) = data {
+                        ctx.write(data).map_err(FlatUnravelError::Transport)?;
+                        replace(&mut this.state, FlatUnravelState::Flush(target));
                     } else {
-                        panic!("invalid state in Tuple1Unravel Write")
+                        panic!("invalid state in FlatUnravel Write")
                     }
                 }
-                Tuple1Unravel::Flush(_) => {
+                FlatUnravelState::Flush(_) => {
                     ready!(Pin::new(&mut *ctx).poll_flush(cx))
-                        .map_err(Tuple1UnravelError::Transport)?;
-                    let data = replace(this, Tuple1Unravel::Done);
-                    if let Tuple1Unravel::Flush(target) = data {
-                        replace(this, Tuple1Unravel::Target(target));
+                        .map_err(FlatUnravelError::Transport)?;
+                    let data = replace(&mut this.state, FlatUnravelState::Done);
+                    if let FlatUnravelState::Flush(target) = data {
+                        replace(&mut this.state, FlatUnravelState::Target(target));
                     } else {
-                        panic!("invalid state in Tuple1Unravel Write")
+                        panic!("invalid state in FlatUnravel Write")
                     }
                 }
-                Tuple1Unravel::Target(target) => {
-                    let finalize = ready!(Pin::new(target).poll(cx, ctx))
-                        .map_err(Tuple1UnravelError::Target)?;
-                    replace(this, Tuple1Unravel::Done);
-                    return Poll::Ready(Ok(finalize.map_err(Tuple1UnravelError::Target)));
+                FlatUnravelState::Target(target) => {
+                    let finalize =
+                        ready!(Pin::new(target).poll(cx, ctx)).map_err(FlatUnravelError::Target)?;
+                    replace(&mut this.state, FlatUnravelState::Done);
+                    return Poll::Ready(Ok(finalize.map_err(FlatUnravelError::Target)));
                 }
-                Tuple1Unravel::Done => panic!("Tuple1Unravel polled after completion"),
+                FlatUnravelState::Done => panic!("FlatUnravel polled after completion"),
             }
         }
     }
 }
 
-impl<T: Unpin, C: ?Sized + Read<<C as Dispatch<T>>::Handle> + Join<T> + Unpin> Future<C>
-    for Tuple1Coalesce<T, C>
+impl<T, C: ?Sized + Read<<C as Dispatch<T>>::Handle> + Join<T> + Unpin> Future<C>
+    for FlatCoalesce<T, C>
 where
     C::Future: Unpin,
     C::Handle: Unpin,
 {
-    type Ok = (T,);
-    type Error = Tuple1CoalesceError<C::Error, <C::Future as Future<C>>::Error>;
+    type Ok = T;
+    type Error = FlatCoalesceError<C::Error, <C::Future as Future<C>>::Error>;
 
     fn poll<R: BorrowMut<C>>(
         mut self: Pin<&mut Self>,
@@ -1006,26 +1040,26 @@ where
         let this = &mut *self;
 
         loop {
-            match this {
-                Tuple1Coalesce::Read => {
+            match &mut this.state {
+                FlatCoalesceState::Read => {
                     let mut ctx = Pin::new(&mut *ctx);
                     let handle =
-                        ready!(ctx.as_mut().read(cx)).map_err(Tuple1CoalesceError::Transport)?;
-                    replace(this, Tuple1Coalesce::Join(ctx.join(handle)));
+                        ready!(ctx.as_mut().read(cx)).map_err(FlatCoalesceError::Transport)?;
+                    replace(&mut this.state, FlatCoalesceState::Join(ctx.join(handle)));
                 }
-                Tuple1Coalesce::Join(future) => {
+                FlatCoalesceState::Join(future) => {
                     let item = ready!(Pin::new(future).poll(cx, &mut *ctx))
-                        .map_err(Tuple1CoalesceError::Dispatch)?;
-                    replace(this, Tuple1Coalesce::Done);
-                    return Poll::Ready(Ok((item,)));
+                        .map_err(FlatCoalesceError::Dispatch)?;
+                    replace(&mut this.state, FlatCoalesceState::Done);
+                    return Poll::Ready(Ok(item));
                 }
-                Tuple1Coalesce::Done => panic!("Tuple1Unravel polled after completion"),
+                FlatCoalesceState::Done => panic!("FlatUnravel polled after completion"),
             }
         }
     }
 }
 
-impl<T: Unpin, C: ?Sized + Write<<C as Dispatch<T>>::Handle> + Fork<T> + Unpin> Unravel<C> for (T,)
+impl<T, C: ?Sized + Write<<C as Dispatch<T>>::Handle> + Fork<T> + Unpin> Unravel<C> for (T,)
 where
     C::Future: Unpin,
     C::Target: Unpin,
@@ -1036,28 +1070,28 @@ where
         C::Finalize,
         fn(
             <C::Finalize as Future<C>>::Error,
-        ) -> Tuple1UnravelError<
+        ) -> FlatUnravelError<
             C::Error,
             <C::Future as Future<C>>::Error,
             <C::Target as Future<C>>::Error,
         >,
     >;
-    type Target = Tuple1Unravel<T, C>;
+    type Target = FlatUnravel<T, C>;
 
     fn unravel(self) -> Self::Target {
-        Tuple1Unravel::Data(self.0)
+        FlatUnravel::new(self.0)
     }
 }
 
-impl<T: Unpin, C: ?Sized + Read<<C as Dispatch<T>>::Handle> + Join<T> + Unpin> Coalesce<C> for (T,)
+impl<T, C: ?Sized + Read<<C as Dispatch<T>>::Handle> + Join<T> + Unpin> Coalesce<C> for (T,)
 where
     C::Future: Unpin,
     C::Handle: Unpin,
 {
-    type Future = Tuple1Coalesce<T, C>;
+    type Future = MapOk<FlatCoalesce<T, C>, fn(T) -> (T,)>;
 
     fn coalesce() -> Self::Future {
-        Tuple1Coalesce::Read
+        FlatCoalesce::new().map_ok(|item| (item,))
     }
 }
 
