@@ -1,7 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{parse_quote, Type};
-use synstructure::{BindingInfo, Structure};
+use synstructure::{BindingInfo, Structure, VariantInfo};
 
 mod coalesce;
 mod unravel;
@@ -22,7 +22,43 @@ fn make_ty(item: Structure) -> Type {
             let ty = write_bindings(item.variants()[0].bindings());
             parse_quote!(#ty)
         }
-        _ => unimplemented!(),
+        _ => {
+            let ty = write_variants(item.variants());
+            parse_quote!(#ty)
+        }
+    }
+}
+
+fn write_variants(variants: &[VariantInfo]) -> TokenStream {
+    let (a, b) = variants.split_at((variants.len() + 1) / 2);
+
+    let a = if a.len() > 1 {
+        Some(write_variants(a))
+    } else if a.len() == 1 && a[0].bindings().len() == 0 {
+        None
+    } else {
+        Some(write_bindings(a[0].bindings()))
+    };
+    let b = if b.len() > 1 {
+        Some(write_variants(b))
+    } else if b.len() == 1 && b[0].bindings().len() == 0 {
+        None
+    } else {
+        Some(write_bindings(b[0].bindings()))
+    };
+
+    if let Some(a) = a {
+        if let Some(b) = b {
+            quote!(Result<#a, #b>)
+        } else {
+            quote!(Option<#a>)
+        }
+    } else {
+        if let Some(b) = b {
+            quote!(Option<#b>)
+        } else {
+            quote!(bool)
+        }
     }
 }
 

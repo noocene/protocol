@@ -1,6 +1,6 @@
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use syn::{parse, Data, DataStruct, DeriveInput, Item};
+use syn::{parse, Data, DataEnum, DataStruct, DeriveInput, Item};
 use synstructure::Structure;
 
 mod structure;
@@ -27,6 +27,20 @@ pub fn protocol(
                         fields: data.fields,
                         struct_token: data.struct_token,
                         semi_token: data.semi_token,
+                    }),
+                }))
+            }
+            Item::Enum(data) => {
+                ident = Some(data.ident.clone());
+                structure::generate(Structure::new(&DeriveInput {
+                    attrs: data.attrs,
+                    generics: data.generics,
+                    ident: data.ident,
+                    vis: data.vis,
+                    data: Data::Enum(DataEnum {
+                        enum_token: data.enum_token,
+                        variants: data.variants,
+                        brace_token: data.brace_token,
                     }),
                 }))
             }

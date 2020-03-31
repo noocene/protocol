@@ -60,7 +60,7 @@ fn generate_unit(item: Structure) -> TokenStream {
 
 fn make_index(len: usize, mut idx: usize) -> TokenStream {
     let mut stream = vec![];
-    
+
     let count = ((len as f32).log2() / 4.0).ceil() as u32;
 
     for _ in 0..count {
@@ -100,6 +100,62 @@ fn make_conv(item: Structure) -> TokenStream {
         1 => {
             conv_bindings(&item.variants()[0])
         }
-        _ => unimplemented!(),
+        _ => write_conv(item.variants()),
+    }
+}
+
+fn write_conv(variants: &[VariantInfo]) -> TokenStream {
+    let (a, b) = variants.split_at((variants.len() + 1) / 2);
+    let _b = b;
+    let _a = a;
+
+    let a = if a.len() > 1 {
+        Some(write_conv(a))
+    } else if a.len() == 1 && a[0].bindings().len() == 0 {
+        None
+    } else {
+        Some(conv_bindings(&a[0]))
+    };
+    let b = if b.len() > 1 {
+        Some(write_conv(b))
+    } else if b.len() == 1 && b[0].bindings().len() == 0 {
+        None
+    } else {
+        Some(conv_bindings(&b[0]))
+    };
+
+    if let Some(a) = a {
+        if let Some(b) = b {
+            quote! {
+                match data {
+                    Ok(data) => #a,
+                    Err(data) => #b
+                }
+            }
+        } else {
+            let b = conv_bindings(&_b[0]);
+            quote!(match data {
+                Some(data) => #a,
+                None => #b
+            })
+        }
+    } else {
+        if let Some(b) = b {
+            let a = conv_bindings(&_a[0]);
+            quote!(match data {
+                Some(data) => #b,
+                None => #a
+            })
+        } else {
+            let a = conv_bindings(&_a[0]);
+            let b = conv_bindings(&_b[0]);
+
+            quote! {
+                match data {
+                    true => #a,
+                    false => #b
+                }
+            }
+        }
     }
 }

@@ -12,3 +12,6 @@ proc-macro2 = "1.0.9"
 syn = { version = "1.0.17", features = ["full"] }
 quote = "1.0.3"
 synstructure = "0.12.3"
+
+[build-dependencies]
+toml = "0.5.6"

@@ -65,7 +65,7 @@ fn generate_unit(item: Structure) -> TokenStream {
 fn write_bindings(bindings: &[BindingInfo]) -> TokenStream {
     match bindings.len() {
         1 => {
-            let ty = &bindings[0].ast().ty;
+            let ty = &bindings[0].pat();
             quote! {
                 #ty
             }
@@ -130,7 +130,75 @@ fn make_conv(item: Structure) -> TokenStream {
         1 => {
             conv_bindings(&item.variants()[0])
         }
-        _ => unimplemented!(),
+        _ => {
+            let mut stream = TokenStream::new();
+            let arms = make_table(item.variants());
+
+            for (arm, variant) in arms.iter().zip(item.variants()) {
+                let variant = variant.pat();
+
+                stream.extend(quote! {
+                    #variant => #arm,
+                });
+            }
+
+            quote! {
+                match self {
+                    #stream
+                }
+            }
+        },
     }
 }
 
+fn make_table(variants: &[VariantInfo]) -> Vec<TokenStream> {
+    let (a, b) = variants.split_at((variants.len() + 1) / 2);
+    let _b = b;
+    let _a = a;
+
+    let a = if a.len() > 1 {
+        Some(make_table(a))
+    } else if a.len() == 1 && a[0].bindings().len() == 0 {
+        None
+    } else {
+        Some(vec![write_bindings(a[0].bindings())])
+    };
+    let b = if b.len() > 1 {
+        Some(make_table(b))
+    } else if b.len() == 1 && b[0].bindings().len() == 0 {
+        None
+    } else {
+        Some(vec![write_bindings(b[0].bindings())])
+    };
+
+    if let Some(a) = a {
+        if let Some(b) = b {
+            let mut items = vec![];
+            for item in a {
+                items.push(quote! { Ok(#item) })
+            }
+            for item in b {
+                items.push(quote! { Err(#item) })
+            }
+            items
+        } else {
+            let mut items = vec![];
+            for item in a {
+                items.push(quote! { Some(#item) })
+            }
+            items.push(quote! { None });
+            items
+        }
+    } else {
+        if let Some(b) = b {
+            let mut items = vec![];
+            for item in b {
+                items.push(quote! { Some(#item) })
+            }
+            items.push(quote! { None });
+            items
+        } else {
+            vec![quote!(true), quote!(false)]
+        }
+    }
+}
