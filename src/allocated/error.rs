@@ -206,18 +206,18 @@ where
 }
 
 impl<
-    T,
-    F: FnMut(ErasedError) -> T,
-    C: ?Sized + Read<<C as Dispatch<ErrorData>>::Handle> + Join<ErrorData> + Unpin,
-> Unpin for ErrorCoalesce<T, F, C>
+        T,
+        F: FnMut(ErasedError) -> T,
+        C: ?Sized + Read<<C as Dispatch<ErrorData>>::Handle> + Join<ErrorData> + Unpin,
+    > Unpin for ErrorCoalesce<T, F, C>
 {
 }
 
 impl<
-    T,
-    F: FnMut(ErasedError) -> T,
-    C: ?Sized + Read<<C as Dispatch<ErrorData>>::Handle> + Join<ErrorData> + Unpin,
-> Future<C> for ErrorCoalesce<T, F, C>
+        T,
+        F: FnMut(ErasedError) -> T,
+        C: ?Sized + Read<<C as Dispatch<ErrorData>>::Handle> + Join<ErrorData> + Unpin,
+    > Future<C> for ErrorCoalesce<T, F, C>
 where
     C::Future: Unpin,
     C::Handle: Unpin,

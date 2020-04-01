@@ -154,8 +154,10 @@ pub enum FutureUnravelError<Z, K, T, I, U, V, W> {
     Finalize(#[source] W),
 }
 
-impl<T: future::Future, C: ?Sized + Write<<C as Contextualize>::Handle> + ReferenceContext + Unpin> Unpin
-    for FutureUnravel<T, C>
+impl<
+        T: future::Future,
+        C: ?Sized + Write<<C as Contextualize>::Handle> + ReferenceContext + Unpin,
+    > Unpin for FutureUnravel<T, C>
 where
     <C::Context as ContextReference<C>>::Target: Write<
             <<C::Context as ContextReference<C>>::Target as Dispatch<
@@ -174,8 +176,10 @@ impl<T: future::Future, C: ?Sized + ReferenceContext + Unpin> Unpin for ErasedFu
 {
 }
 
-impl<T: future::Future, C: ?Sized + Write<<C as Contextualize>::Handle> + ReferenceContext + Unpin>
-    Future<C> for FutureUnravel<T, C>
+impl<
+        T: future::Future,
+        C: ?Sized + Write<<C as Contextualize>::Handle> + ReferenceContext + Unpin,
+    > Future<C> for FutureUnravel<T, C>
 where
     <C::Context as ContextReference<C>>::Target: Write<
             <<C::Context as ContextReference<C>>::Target as Dispatch<
@@ -260,8 +264,10 @@ where
     }
 }
 
-impl<T: future::Future, C: ?Sized + ReferenceContext + Write<<C as Contextualize>::Handle> + Unpin>
-    Future<C> for ErasedFutureUnravel<T, C>
+impl<
+        T: future::Future,
+        C: ?Sized + ReferenceContext + Write<<C as Contextualize>::Handle> + Unpin,
+    > Future<C> for ErasedFutureUnravel<T, C>
 where
     <C::Context as ContextReference<C>>::Target: Write<
             <<C::Context as ContextReference<C>>::Target as Dispatch<
@@ -409,8 +415,8 @@ pub enum FutureCoalesceError<E, T> {
     Contextualize(E),
 }
 
-impl<C: Unpin + Notify<T> + Read<<C as Dispatch<<C as Notify<T>>::Notification>>::Handle>, T> future::Future
-    for ErasedFutureCoalesce<T, C>
+impl<C: Unpin + Notify<T> + Read<<C as Dispatch<<C as Notify<T>>::Notification>>::Handle>, T>
+    future::Future for ErasedFutureCoalesce<T, C>
 where
     <C as Join<<C as Notify<T>>::Notification>>::Future: Unpin,
     C::Unwrap: Unpin,
@@ -455,12 +461,12 @@ where
 }
 
 impl<
-    'a,
-    O,
-    P: Fn(ErasedFutureCoalesce<T, C::Context>) -> O,
-    T: Unpin,
-    C: ?Sized + Read<<C as Contextualize>::Handle> + CloneContext,
-> Future<C> for FutureCoalesce<'a, O, P, T, C>
+        'a,
+        O,
+        P: Fn(ErasedFutureCoalesce<T, C::Context>) -> O,
+        T: Unpin,
+        C: ?Sized + Read<<C as Contextualize>::Handle> + CloneContext,
+    > Future<C> for FutureCoalesce<'a, O, P, T, C>
 where
     C::JoinOutput: Unpin,
     C: Unpin,

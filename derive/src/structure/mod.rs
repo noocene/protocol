@@ -1,12 +1,14 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{parse_quote, Type};
-use synstructure::{BindingInfo, Structure, VariantInfo};
+use synstructure::{AddBounds, BindingInfo, Structure, VariantInfo};
 
 mod coalesce;
 mod unravel;
 
-pub fn generate(item: Structure) -> TokenStream {
+pub fn generate(mut item: Structure) -> TokenStream {
+    item.add_bounds(AddBounds::None);
+
     let coalesce = coalesce::generate(item.clone());
     let unravel = unravel::generate(item.clone());
 

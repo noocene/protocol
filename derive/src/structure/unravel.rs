@@ -1,6 +1,6 @@
 use proc_macro2::TokenStream;
 use quote::quote;
-use synstructure::{Structure, VariantInfo, BindStyle, BindingInfo};
+use synstructure::{BindStyle, BindingInfo, Structure, VariantInfo};
 
 pub fn generate(mut item: Structure) -> TokenStream {
     match item.variants().len() {
@@ -13,7 +13,7 @@ pub fn generate(mut item: Structure) -> TokenStream {
             let conv = make_conv(item.clone());
 
             item.gen_impl(quote! {
-                gen impl<C: ?Sized + __protocol::Write<<C as __protocol::Dispatch<#ty>>::Handle> + __protocol::Fork<#ty> + Unpin> __protocol::Unravel<C> for @Self 
+                gen impl<C: ?Sized + __protocol::Write<<C as __protocol::Dispatch<#ty>>::Handle> + __protocol::Fork<#ty> + Unpin> __protocol::Unravel<C> for @Self
                 where
                     <C as __protocol::Fork<#ty>>::Future: Unpin,
                     <C as __protocol::Fork<#ty>>::Target: Unpin,
@@ -30,7 +30,7 @@ pub fn generate(mut item: Structure) -> TokenStream {
                     }
                 }
             })
-        },
+        }
     }
 }
 
@@ -121,15 +121,13 @@ fn conv_bindings(variant: &VariantInfo) -> TokenStream {
                     #pat => #conv
                 }
             }
-        },
+        }
     }
 }
 
 fn make_conv(item: Structure) -> TokenStream {
     match item.variants().len() {
-        1 => {
-            conv_bindings(&item.variants()[0])
-        }
+        1 => conv_bindings(&item.variants()[0]),
         _ => {
             let mut stream = TokenStream::new();
             let arms = make_table(item.variants());
@@ -147,7 +145,7 @@ fn make_conv(item: Structure) -> TokenStream {
                     #stream
                 }
             }
-        },
+        }
     }
 }
 
