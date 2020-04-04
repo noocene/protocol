@@ -1,5 +1,5 @@
 mod default;
-pub use default::{Default, DefaultAdapter};
+pub use default::Default;
 
 pub trait Adapt<T> {
     type Adapter;
