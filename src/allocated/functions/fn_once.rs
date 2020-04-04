@@ -143,13 +143,8 @@ where
 {
 }
 
-impl<
-        C: ?Sized + Write<<C as Contextualize>::Handle> + ReferenceContext,
-        T,
-        U,
-        F,
-        M: Fn(F, T) -> U,
-    > Future<C> for ErasedFnOnceUnravel<C, T, U, F, M>
+impl<C: ?Sized + Write<<C as Contextualize>::Handle> + ReferenceContext, T, U, F, M: Fn(F, T) -> U>
+    Future<C> for ErasedFnOnceUnravel<C, T, U, F, M>
 where
     <C::Context as ContextReference<C>>::Target: Notify<T>
         + Notify<U>
@@ -376,13 +371,8 @@ pub struct FnOnceUnravel<
     conv: Option<M>,
 }
 
-impl<
-        C: ?Sized + Write<<C as Contextualize>::Handle> + ReferenceContext,
-        T,
-        U,
-        F,
-        M: Fn(F, T) -> U,
-    > Unpin for FnOnceUnravel<C, T, U, F, M>
+impl<C: ?Sized + Write<<C as Contextualize>::Handle> + ReferenceContext, T, U, F, M: Fn(F, T) -> U> Unpin
+    for FnOnceUnravel<C, T, U, F, M>
 where
     <C::Context as ContextReference<C>>::Target: Notify<T>
         + Notify<U>
@@ -416,13 +406,8 @@ where
 {
 }
 
-impl<
-        C: ?Sized + Write<<C as Contextualize>::Handle> + ReferenceContext,
-        T,
-        U,
-        F,
-        M: Fn(F, T) -> U,
-    > Future<C> for FnOnceUnravel<C, T, U, F, M>
+impl<C: ?Sized + Write<<C as Contextualize>::Handle> + ReferenceContext, T, U, F, M: Fn(F, T) -> U>
+    Future<C> for FnOnceUnravel<C, T, U, F, M>
 where
     <C::Context as ContextReference<C>>::Target: Notify<T>
         + Notify<U>
@@ -586,14 +571,14 @@ pub struct ErasedFnOnceCoalesce<
 }
 
 impl<
-        T,
-        U,
-        C: Notify<T>
-            + Notify<U>
-            + Write<<C as Dispatch<<C as Notify<T>>::Notification>>::Handle>
-            + Read<<C as Dispatch<<C as Notify<U>>::Notification>>::Handle>
-            + Finalize<<C as Fork<<C as Notify<T>>::Notification>>::Finalize>,
-    > Unpin for ErasedFnOnceCoalesce<T, U, C>
+    T,
+    U,
+    C: Notify<T>
+        + Notify<U>
+        + Write<<C as Dispatch<<C as Notify<T>>::Notification>>::Handle>
+        + Read<<C as Dispatch<<C as Notify<U>>::Notification>>::Handle>
+        + Finalize<<C as Fork<<C as Notify<T>>::Notification>>::Finalize>,
+> Unpin for ErasedFnOnceCoalesce<T, U, C>
 where
     <C as Fork<<C as Notify<T>>::Notification>>::Finalize:
         Future<<C as Finalize<<C as Fork<<C as Notify<T>>::Notification>>::Finalize>>::Target>,
@@ -841,13 +826,13 @@ pub struct FnOnceCoalesce<
 }
 
 impl<
-        'a,
-        O,
-        P: Fn(ErasedFnOnce<T, U, C::Context>) -> O,
-        T: Unpin,
-        U,
-        C: ?Sized + Read<<C as Contextualize>::Handle> + CloneContext,
-    > Future<C> for FnOnceCoalesce<'a, O, P, T, U, C>
+    'a,
+    O,
+    P: Fn(ErasedFnOnce<T, U, C::Context>) -> O,
+    T: Unpin,
+    U,
+    C: ?Sized + Read<<C as Contextualize>::Handle> + CloneContext,
+> Future<C> for FnOnceCoalesce<'a, O, P, T, U, C>
 where
     C::JoinOutput: Unpin,
     C: Unpin,
