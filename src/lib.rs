@@ -13,7 +13,10 @@ use thiserror::Error;
 mod arrays;
 pub mod future;
 pub use future::{Future, FutureExt};
+pub mod adapter;
 mod option;
+mod util;
+pub use util::*;
 mod primitives;
 mod result;
 mod tuples;
@@ -59,7 +62,7 @@ pub trait FinalizeImmediate<T: Future<Self::Target>> {
     type Target;
     type Error;
 
-    fn finalize(&mut self, future: T) -> Result<(), Self::Error>;
+    fn finalize_immediate(&mut self, future: T) -> Result<(), Self::Error>;
 }
 
 pub trait Coalesce<C: ?Sized>: Sized {

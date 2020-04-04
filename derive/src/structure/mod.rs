@@ -6,6 +6,18 @@ use synstructure::{AddBounds, BindingInfo, Structure, VariantInfo};
 mod coalesce;
 mod unravel;
 
+pub fn generate_adapted(mut item: Structure, adapter: Type) -> TokenStream {
+    item.add_bounds(AddBounds::None);
+
+    let coalesce = coalesce::generate_adapted(item.clone(), adapter.clone());
+    let unravel = unravel::generate_adapted(item, adapter);
+
+    quote! {
+        #coalesce
+        #unravel
+    }
+}
+
 pub fn generate(mut item: Structure) -> TokenStream {
     item.add_bounds(AddBounds::None);
 

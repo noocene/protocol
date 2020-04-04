@@ -18,4 +18,4 @@ derive = { path = "./derive" }
 [features]
 default = ["std", "alloc"]
 alloc = ["core-error/alloc"]
-std = ["alloc", "core-error/std", "core-error/std", "void/std"]
+std = ["alloc", "core-error/std", "core-error/std", "void/std", "derive/std"]

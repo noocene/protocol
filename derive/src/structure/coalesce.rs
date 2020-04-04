@@ -1,6 +1,6 @@
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::Index;
+use syn::{Index, Type};
 use synstructure::{Structure, VariantInfo};
 
 pub fn generate(item: Structure) -> TokenStream {
@@ -28,6 +28,24 @@ pub fn generate(item: Structure) -> TokenStream {
             })
         }
     }
+}
+
+pub fn generate_adapted(item: Structure, adapter: Type) -> TokenStream {
+    item.gen_impl(quote! {
+        compile_error!("adapters are currently broken due to https://github.com/rust-lang/rust/issues/70756");
+
+        gen impl<C: ?Sized + __protocol::Read<<C as __protocol::Dispatch<<#adapter as __protocol::adapter::Adapt<Self>>::Adapter>>::Handle> + __protocol::Join<<#adapter as __protocol::adapter::Adapt<Self>>::Adapter> + Unpin> __protocol::Coalesce<C> for @Self
+        where
+            <C as __protocol::Join<<#adapter as __protocol::adapter::Adapt<Self>>::Adapter>>::Future: Unpin,
+            <C as __protocol::Dispatch<<#adapter as __protocol::adapter::Adapt<Self>>::Adapter>>::Handle: Unpin
+        {
+            type Future = __protocol::future::MapOk<__protocol::FlatCoalesce<<#adapter as __protocol::adapter::Adapt<Self>>::Adapter, C>, fn(<#adapter as __protocol::adapter::Adapt<Self>>::Adapter) -> Self>;
+
+            fn coalesce() -> Self::Future {
+                __protocol::FutureExt::map_ok(__protocol::FlatCoalesce::new(), __protocol::adapter::Adapt::unwrap)
+            }
+        }
+    })
 }
 
 fn generate_never(item: Structure) -> TokenStream {

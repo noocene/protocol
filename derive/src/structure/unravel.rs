@@ -1,5 +1,6 @@
 use proc_macro2::TokenStream;
 use quote::quote;
+use syn::Type;
 use synstructure::{BindStyle, BindingInfo, Structure, VariantInfo};
 
 pub fn generate(mut item: Structure) -> TokenStream {
@@ -32,6 +33,27 @@ pub fn generate(mut item: Structure) -> TokenStream {
             })
         }
     }
+}
+
+pub fn generate_adapted(item: Structure, adapter: Type) -> TokenStream {
+    item.gen_impl(quote! {
+        compile_error!("adapters are currently broken due to https://github.com/rust-lang/rust/issues/70756");
+
+        gen impl<C: ?Sized + __protocol::Write<<C as __protocol::Dispatch<<#adapter as __protocol::adapter::Adapt<Self>>::Adapter>>::Handle> + __protocol::Fork<<#adapter as __protocol::adapter::Adapt<Self>>::Adapter> + Unpin> __protocol::Unravel<C> for @Self
+        where
+            <C as __protocol::Fork<<#adapter as __protocol::adapter::Adapt<Self>>::Adapter>>::Future: Unpin,
+            <C as __protocol::Fork<<#adapter as __protocol::adapter::Adapt<Self>>::Adapter>>::Target: Unpin,
+            <C as __protocol::Fork<<#adapter as __protocol::adapter::Adapt<Self>>::Adapter>>::Finalize: Unpin,
+            <C as __protocol::Dispatch<<#adapter as __protocol::adapter::Adapt<Self>>::Adapter>>::Handle: Unpin
+        {
+            type Target = __protocol::FlatUnravel<<#adapter as __protocol::adapter::Adapt<Self>>::Adapter, C>;
+            type Finalize = <__protocol::FlatUnravel<<#adapter as __protocol::adapter::Adapt<Self>>::Adapter, C> as __protocol::Future<C>>::Ok;
+
+            fn unravel(self) -> Self::Target {
+                __protocol::FlatUnravel::new(<#adapter as __protocol::adapter::Adapt<Self>>::wrap(self))
+            }
+        }
+    })
 }
 
 fn generate_never(item: Structure) -> TokenStream {

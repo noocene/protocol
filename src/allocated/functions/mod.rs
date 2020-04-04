@@ -191,6 +191,42 @@ where
     context: <<C::Context as ContextReference<C>>::Target as ReferenceContext>::Context,
 }
 
+impl<C: ?Sized + ReferenceContext, T, U, F, M> ErasedFnUnravelInstance<C, T, U, F, M>
+where
+    <C::Context as ContextReference<C>>::Target: ReferenceContext,
+    <<<C::Context as ContextReference<C>>::Target as ReferenceContext>::Context as ContextReference<
+        <C::Context as ContextReference<C>>::Target,
+    >>::Target: Notify<T>
+        + Notify<U>
+        + Read<
+            <<<<C::Context as ContextReference<C>>::Target as ReferenceContext>::Context as ContextReference<
+                <C::Context as ContextReference<C>>::Target,
+            >>::Target as Dispatch<
+                <<<<C::Context as ContextReference<C>>::Target as ReferenceContext>::Context as ContextReference<
+                    <C::Context as ContextReference<C>>::Target,
+                >>::Target as Notify<T>>::Notification,
+            >>::Handle,
+        > + Write<
+            <<<<C::Context as ContextReference<C>>::Target as ReferenceContext>::Context as ContextReference<
+                <C::Context as ContextReference<C>>::Target,
+            >>::Target as Dispatch<
+                <<<<C::Context as ContextReference<C>>::Target as ReferenceContext>::Context as ContextReference<
+                    <C::Context as ContextReference<C>>::Target,
+                >>::Target as Notify<U>>::Notification,
+            >>::Handle,
+        >,
+{
+    pub fn new(
+        context: <<C::Context as ContextReference<C>>::Target as ReferenceContext>::Context,
+    ) -> Self {
+        ErasedFnUnravelInstance {
+            state: ErasedFnUnravelInstanceState::Read,
+            marker: PhantomData,
+            context,
+        }
+    }
+}
+
 impl<C: ?Sized + ReferenceContext, T, U, F, M> Unpin for ErasedFnUnravelInstance<C, T, U, F, M>
 where
     <C::Context as ContextReference<C>>::Target: ReferenceContext,
@@ -1009,11 +1045,7 @@ where
                 ErasedFnUnravelState::Contextualize(future) => {
                     let ct = ready!(Pin::new(future).poll(cx, &mut *context))
                         .map_err(FnUnravelError::SubContextualize)?;
-                    let mut fut = ErasedFnUnravelInstance {
-                        state: ErasedFnUnravelInstanceState::Read,
-                        context: ct,
-                        marker: PhantomData,
-                    };
+                    let mut fut = ErasedFnUnravelInstance::new(ct);
                     if let Poll::Pending = Pin::new(&mut fut).poll(
                         cx,
                         context.borrow_mut(),
@@ -1699,7 +1731,7 @@ where
     C::Target: Unpin + CloneContext + Write<Option<<C::Target as Contextualize>::Handle>>,
 {
     fn drop(&mut self) {
-        let _ = self.context.finalize(ErasedFnComplete::Write);
+        let _ = self.context.finalize_immediate(ErasedFnComplete::Write);
     }
 }
 
