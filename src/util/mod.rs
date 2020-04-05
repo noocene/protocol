@@ -1,7 +1,9 @@
 mod fork_context_ref;
-pub use fork_context_ref::ForkContextRef;
+pub use fork_context_ref::*;
 mod join_context_owned;
-pub use join_context_owned::JoinContextOwned;
+pub use join_context_owned::*;
+mod join_context_shared;
+pub use join_context_shared::*;
 
 use crate::{ContextReference, Notify, ReferenceContext};
 
