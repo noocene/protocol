@@ -88,6 +88,7 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
 
     let mut bounds = vec![];
     let mut ref_bounds = vec![];
+    let mut logic = vec![];
 
     let mut has_methods = false;
 
@@ -283,23 +284,7 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
 
             let sig = &method.sig;
 
-            let logic = if moves {
-                quote!(<#ret as __protocol::allocated::Flatten<__protocol::allocated::ProtocolError, __protocol::derive_deps::MoveCoalesce<(#r_args), #ret, __DERIVE_PROTOCOL_TRANSPORT, _, _>>>::flatten(__protocol::derive_deps::MoveCoalesce::new(context, (#bindings), |handle| {
-                    __DERIVE_CALL::#ident(handle)
-                })))
-            } else {
-                quote! {
-                    <#ret as __protocol::allocated::Flatten<__protocol::allocated::ProtocolError, __protocol::derive_deps::BorrowCoalesce<(#r_args), #ret, __DERIVE_PROTOCOL_TRANSPORT, _, _>>>::flatten(__protocol::derive_deps::BorrowCoalesce::new(context, (#bindings), |handle| {
-                        __DERIVE_CALL::#ident(handle)
-                    }))
-                }
-            };
-
-            impl_stream.extend(quote!(#sig {
-                #get_context
-
-                #logic
-            }));
+            logic.push((ident.clone(), moves, get_context, ret, sig.clone(), r_args, bindings.clone()));
 
             if moves {
                 delegate_stream.extend(quote!(#sig {
@@ -311,6 +296,26 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
                 }));
             }
         }
+    }
+
+    for (ident, moves, get_context, ret, sig, r_args, bindings) in logic {
+        let logic = if moves {
+            quote!(<#ret as __protocol::allocated::Flatten<__protocol::allocated::ProtocolError, __protocol::derive_deps::MoveCoalesce<(#r_args), #ret, __DERIVE_PROTOCOL_TRANSPORT, _, _>>>::flatten(__protocol::derive_deps::MoveCoalesce::new(context, (#bindings), |handle| {
+                __DERIVE_CALL::<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>::#ident(handle).into()
+            })))
+        } else {
+            quote! {
+                <#ret as __protocol::allocated::Flatten<__protocol::allocated::ProtocolError, __protocol::derive_deps::BorrowCoalesce<(#r_args), #ret, __DERIVE_PROTOCOL_TRANSPORT, _, _>>>::flatten(__protocol::derive_deps::BorrowCoalesce::new(context, (#bindings), |handle| {
+                    __DERIVE_CALL::<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>::#ident(handle).into()
+                }))
+            }
+        };
+
+        impl_stream.extend(quote!(#sig {
+            #get_context
+
+            #logic
+        }));
     }
 
     let (context_trait, context_wrapper) = if some_by_ref {
@@ -331,23 +336,23 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
     if has_methods {
         r_context_bounds.extend(
             quote! { 
-                + __protocol::Write<__DERIVE_CALL<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>>
-                + __protocol::FinalizeImmediate<__protocol::derive_deps::Complete<__DERIVE_CALL<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>>>
+                + __protocol::Write<__DERIVE_CALL_ALIAS<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>>
+                + __protocol::FinalizeImmediate<__protocol::derive_deps::Complete<__DERIVE_CALL_ALIAS<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>>>
             }
         );
-        where_clause.predicates.push(parse_quote!(<__DERIVE_PROTOCOL_TRANSPORT as __protocol::Write<__DERIVE_CALL<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>>>::Error: __protocol::derive_deps::Error + ::core::marker::Send + 'static));
+        where_clause.predicates.push(parse_quote!(<__DERIVE_PROTOCOL_TRANSPORT as __protocol::Write<__DERIVE_CALL_ALIAS<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>>>::Error: __protocol::derive_deps::Error + ::core::marker::Send + 'static));
         where_clause.predicates.push(parse_quote! {
-            <__DERIVE_PROTOCOL_TRANSPORT as __protocol::FinalizeImmediate<__protocol::derive_deps::Complete<__DERIVE_CALL<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>>>>::Target: __protocol::Write<__DERIVE_CALL<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>> + ::core::marker::Unpin
+            <__DERIVE_PROTOCOL_TRANSPORT as __protocol::FinalizeImmediate<__protocol::derive_deps::Complete<__DERIVE_CALL_ALIAS<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>>>>::Target: __protocol::Write<__DERIVE_CALL_ALIAS<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>> + ::core::marker::Unpin
         });
         c_context_bounds.extend(
         quote! {
-                + __protocol::Write<__DERIVE_CALL<<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context, #r_generics>>
-                + __protocol::FinalizeImmediate<__protocol::derive_deps::Complete<__DERIVE_CALL<<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context, #r_generics>>>
+                + __protocol::Write<__DERIVE_CALL_ALIAS<<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context, #r_generics>>
+                + __protocol::FinalizeImmediate<__protocol::derive_deps::Complete<__DERIVE_CALL_ALIAS<<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context, #r_generics>>>
             },
         );
-        ty_where_clause.predicates.push(parse_quote!(<<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context as __protocol::Write<__DERIVE_CALL<<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context, #r_generics>>>::Error: __protocol::derive_deps::Error + ::core::marker::Send + 'static));
+        ty_where_clause.predicates.push(parse_quote!(<<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context as __protocol::Write<__DERIVE_CALL_ALIAS<<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context, #r_generics>>>::Error: __protocol::derive_deps::Error + ::core::marker::Send + 'static));
         ty_where_clause.predicates.push(parse_quote! {
-            <<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context as __protocol::FinalizeImmediate<__protocol::derive_deps::Complete<__DERIVE_CALL<<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context, #r_generics>>>>::Target: __protocol::Write<__DERIVE_CALL<<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context, #r_generics>> + ::core::marker::Unpin
+            <<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context as __protocol::FinalizeImmediate<__protocol::derive_deps::Complete<__DERIVE_CALL_ALIAS<<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context, #r_generics>>>>::Target: __protocol::Write<__DERIVE_CALL_ALIAS<<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context, #r_generics>> + ::core::marker::Unpin
         });
     }
 
@@ -379,8 +384,8 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
         ty_where_clause.predicates.push(parse_quote!(<<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context as __protocol::Fork<<<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context as __protocol::Notify<(#n_args)>>::Notification>>::Target: ::core::marker::Unpin));
         ty_where_clause.predicates.push(parse_quote!(<<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context as __protocol::Notify<(#n_args)>>::Wrap: ::core::marker::Unpin));
         ty_where_clause.predicates.push(parse_quote!(<<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context as __protocol::Fork<<<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context as __protocol::Notify<(#n_args)>>::Notification>>::Future: ::core::marker::Unpin));
-        ty_where_clause.predicates.push(parse_quote!(#ret: __protocol::allocated::Flatten<__protocol::allocated::ProtocolError, __protocol::derive_deps::MoveCoalesce<(#n_args), #ret, <__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context, __DERIVE_CALL<<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context, #r_generics>, fn(<<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context as __protocol::Dispatch<<<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context as __protocol::Notify<(#n_args)>>::Notification>>::Handle) -> __DERIVE_CALL<<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context, #r_generics>>>));
-        where_clause.predicates.push(parse_quote!(#ret: __protocol::allocated::Flatten<__protocol::allocated::ProtocolError, __protocol::derive_deps::MoveCoalesce<(#n_args), #ret, __DERIVE_PROTOCOL_TRANSPORT, __DERIVE_CALL<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>, fn(<__DERIVE_PROTOCOL_TRANSPORT as __protocol::Dispatch<<__DERIVE_PROTOCOL_TRANSPORT as __protocol::Notify<(#n_args)>>::Notification>>::Handle) -> __DERIVE_CALL<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>>>));
+        ty_where_clause.predicates.push(parse_quote!(#ret: __protocol::allocated::Flatten<__protocol::allocated::ProtocolError, __protocol::derive_deps::MoveCoalesce<(#n_args), #ret, <__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context, __DERIVE_CALL_ALIAS<<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context, #r_generics>, fn(<<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context as __protocol::Dispatch<<<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context as __protocol::Notify<(#n_args)>>::Notification>>::Handle) -> __DERIVE_CALL_ALIAS<<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context, #r_generics>>>));
+        where_clause.predicates.push(parse_quote!(#ret: __protocol::allocated::Flatten<__protocol::allocated::ProtocolError, __protocol::derive_deps::MoveCoalesce<(#n_args), #ret, __DERIVE_PROTOCOL_TRANSPORT, __DERIVE_CALL_ALIAS<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>, fn(<__DERIVE_PROTOCOL_TRANSPORT as __protocol::Dispatch<<__DERIVE_PROTOCOL_TRANSPORT as __protocol::Notify<(#n_args)>>::Notification>>::Handle) -> __DERIVE_CALL_ALIAS<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>>>));
     }
 
     for (ret, r_args) in ref_bounds {
@@ -469,8 +474,8 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
                 <<<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context as __protocol::CloneContext>::Context as __protocol::Dispatch<<<<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context as __protocol::CloneContext>::Context as __protocol::Notify<(#r_args)>>::Notification>>::Handle,
             >>::Error: ::core::marker::Send + __protocol::derive_deps::Error + 'static
         });
-        ty_where_clause.predicates.push(parse_quote!(#ret: __protocol::allocated::Flatten<__protocol::allocated::ProtocolError, __protocol::derive_deps::BorrowCoalesce<(#r_args), #ret, <__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context, __DERIVE_CALL<<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context, #r_generics>, fn(<<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context as __protocol::Contextualize>::Handle) -> __DERIVE_CALL<<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context, #r_generics>>>));
-        where_clause.predicates.push(parse_quote!(#ret: __protocol::allocated::Flatten<__protocol::allocated::ProtocolError, __protocol::derive_deps::BorrowCoalesce<(#r_args), #ret, __DERIVE_PROTOCOL_TRANSPORT, __DERIVE_CALL<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>, fn(<__DERIVE_PROTOCOL_TRANSPORT as __protocol::Contextualize>::Handle) -> __DERIVE_CALL<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>>>));
+        ty_where_clause.predicates.push(parse_quote!(#ret: __protocol::allocated::Flatten<__protocol::allocated::ProtocolError, __protocol::derive_deps::BorrowCoalesce<(#r_args), #ret, <__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context, __DERIVE_CALL_ALIAS<<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context, #r_generics>, fn(<<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context as __protocol::Contextualize>::Handle) -> __DERIVE_CALL_ALIAS<<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context, #r_generics>>>));
+        where_clause.predicates.push(parse_quote!(#ret: __protocol::allocated::Flatten<__protocol::allocated::ProtocolError, __protocol::derive_deps::BorrowCoalesce<(#r_args), #ret, __DERIVE_PROTOCOL_TRANSPORT, __DERIVE_CALL_ALIAS<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>, fn(<__DERIVE_PROTOCOL_TRANSPORT as __protocol::Contextualize>::Handle) -> __DERIVE_CALL_ALIAS<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>>>));
     }
 
     let mut context_binding = quote!();
@@ -523,7 +528,7 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
                     assoc_only.extend(quote!(#ident,));
                 }
             }
-            quote!( __DERIVE_PROTOCOL_TRANSPORT: __protocol::FinalizeImmediate<__protocol::derive_deps::Complete<__DERIVE_CALL<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>>> #d_context_bounds, <__DERIVE_PROTOCOL_TRANSPORT as __protocol::FinalizeImmediate<__protocol::derive_deps::Complete<__DERIVE_CALL<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>>>>::Target: __protocol::Write<__DERIVE_CALL<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>> + ::core::marker::Unpin)
+            quote!( __DERIVE_PROTOCOL_TRANSPORT: __protocol::FinalizeImmediate<__protocol::derive_deps::Complete<__DERIVE_CALL_ALIAS<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>>> #d_context_bounds, <__DERIVE_PROTOCOL_TRANSPORT as __protocol::FinalizeImmediate<__protocol::derive_deps::Complete<__DERIVE_CALL_ALIAS<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>>>>::Target: __protocol::Write<__DERIVE_CALL_ALIAS<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>> + ::core::marker::Unpin)
         } else {
             quote!()
         };
@@ -578,14 +583,20 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
 
     let other_shim = if has_methods {
         quote! {
-            impl #assoc_only Drop for __DERIVE_COALESCE_SHIM #assoc_only where __DERIVE_PROTOCOL_TRANSPORT: __protocol::FinalizeImmediate<__protocol::derive_deps::Complete<__DERIVE_CALL<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>>> #d_context_bounds, <__DERIVE_PROTOCOL_TRANSPORT as __protocol::FinalizeImmediate<__protocol::derive_deps::Complete<__DERIVE_CALL<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>>>>::Target: __protocol::Write<__DERIVE_CALL<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>> + ::core::marker::Unpin {
+            impl #assoc_only Drop for __DERIVE_COALESCE_SHIM #assoc_only where __DERIVE_PROTOCOL_TRANSPORT: __protocol::FinalizeImmediate<__protocol::derive_deps::Complete<__DERIVE_CALL_ALIAS<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>>> #d_context_bounds, <__DERIVE_PROTOCOL_TRANSPORT as __protocol::FinalizeImmediate<__protocol::derive_deps::Complete<__DERIVE_CALL_ALIAS<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>>>>::Target: __protocol::Write<__DERIVE_CALL_ALIAS<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>> + ::core::marker::Unpin {
                 fn drop(&mut self) {
                     if let Some(context) = self.1.as_mut() {
-                        __protocol::derive_deps::Complete::complete::<__DERIVE_PROTOCOL_TRANSPORT, _>(context, __DERIVE_CALL::__DERIVE_TERMINATE);
+                        __protocol::derive_deps::Complete::complete::<__DERIVE_PROTOCOL_TRANSPORT, _>(context, __DERIVE_CALL::<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>::__DERIVE_TERMINATE.into());
                     }
                 }
             }
         }
+    } else {
+        quote!()
+    };
+
+    let m_bound = if has_methods {
+        quote!(, <__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context: Sized $(+ $marker)*)
     } else {
         quote!()
     };
@@ -604,7 +615,7 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
                 $($marker:ident)*
             ),+) => {
                 $(
-                    impl #impl_generics __protocol::Coalesce<__DERIVE_PROTOCOL_TRANSPORT> for __alloc::boxed::Box<dyn #ident #type_generics + 'derive_lifetime_param $(+ $marker)*> #ty_where_clause {
+                    impl #impl_generics __protocol::Coalesce<__DERIVE_PROTOCOL_TRANSPORT> for __alloc::boxed::Box<dyn #ident #type_generics + 'derive_lifetime_param $(+ $marker)*> #ty_where_clause #m_bound {
                         #stream
                     }
 

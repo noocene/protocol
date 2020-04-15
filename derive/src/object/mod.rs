@@ -1,9 +1,11 @@
+use crate::{make_ty, write_coalesce_conv, write_unravel_conv};
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::{
-    parse_quote, FnArg, GenericArgument, ItemTrait, PathArguments, ReturnType, TraitItem, Type,
-    TypeParamBound,
+    parse2, parse_quote, Data, DataEnum, DeriveInput, FnArg, GenericArgument, ItemEnum, ItemTrait,
+    PathArguments, ReturnType, TraitItem, Type, TypeParamBound,
 };
+use synstructure::{BindStyle, Structure};
 
 mod coalesce;
 mod unravel;
@@ -186,16 +188,13 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
                     args.extend(quote!(#ident,));
                 }
                 call_context_bounds.extend(quote!(+ __protocol::Notify<(#args)>));
-                let bound = quote!(<C as __protocol::Dispatch<<C as __protocol::Notify<(#args)>>::Notification>>::Handle: serde::Serialize + serde::de::DeserializeOwned).to_string();
                 call.extend(quote! {
-                    #[serde(bound = #bound)]
                     #ident(<C as __protocol::Dispatch<<C as __protocol::Notify<(#args)>>::Notification>>::Handle),
                 });
             } else {
                 some_by_ref = true;
 
                 call.extend(quote! {
-                    #[serde(bound = "<C as __protocol::Contextualize>::Handle: serde::Serialize + serde::de::DeserializeOwned")]
                     #ident(<C as __protocol::Contextualize>::Handle),
                 });
             };
@@ -209,9 +208,44 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
     };
 
     if !call.is_empty() {
-        call = quote!(#[derive(serde::Serialize, serde::Deserialize)] #[serde(bound = "")] #vis enum __DERIVE_CALL<C: #ctxtualize #call_context_bounds, #call_generics> {
+        call = quote!(#vis enum __DERIVE_CALL<C: #ctxtualize #call_context_bounds, #call_generics> {
             #call
             __DERIVE_TERMINATE
+        });
+
+        let data = parse2::<ItemEnum>(call.clone()).unwrap();
+        let input = DeriveInput {
+            attrs: data.attrs,
+            generics: data.generics,
+            ident: data.ident,
+            vis: data.vis,
+            data: Data::Enum(DataEnum {
+                enum_token: data.enum_token,
+                variants: data.variants,
+                brace_token: data.brace_token,
+            }),
+        };
+        let mut structure = Structure::new(&input);
+        let ty = make_ty(structure.clone());
+
+        let from = write_coalesce_conv(structure.variants());
+        structure.bind_with(|_| BindStyle::Move);
+        let into = write_unravel_conv(structure);
+
+        call.extend(quote! {
+            type __DERIVE_CALL_ALIAS<C: #ctxtualize #call_context_bounds, #call_generics> = #ty;
+
+            impl<C: #ctxtualize #call_context_bounds, #call_generics> From<#ty> for __DERIVE_CALL<C, #call_generics> {
+                fn from(data: #ty) -> Self {
+                    #from
+                }
+            }
+
+            impl<C: #ctxtualize #call_context_bounds, #call_generics> Into<#ty> for __DERIVE_CALL<C, #call_generics> {
+                fn into(self) -> #ty {
+                    #into
+                }
+            }
         });
     }
 

@@ -116,7 +116,7 @@ fn make_conv(item: Structure) -> TokenStream {
     }
 }
 
-fn write_conv(variants: &[VariantInfo]) -> TokenStream {
+pub fn write_conv(variants: &[VariantInfo]) -> TokenStream {
     let (a, b) = variants.split_at((variants.len() + 1) / 2);
     let _b = b;
     let _a = a;

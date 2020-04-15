@@ -6,6 +6,9 @@ use synstructure::{AddBounds, BindingInfo, Structure, VariantInfo};
 mod coalesce;
 mod unravel;
 
+pub use coalesce::write_conv as write_coalesce_conv;
+pub use unravel::make_conv as write_unravel_conv;
+
 pub fn generate_adapted(mut item: Structure, adapter: Type) -> TokenStream {
     item.add_bounds(AddBounds::None);
 
@@ -30,7 +33,7 @@ pub fn generate(mut item: Structure) -> TokenStream {
     }
 }
 
-fn make_ty(item: Structure) -> Type {
+pub fn make_ty(item: Structure) -> Type {
     match item.variants().len() {
         1 => {
             let ty = write_bindings(item.variants()[0].bindings());

@@ -12,6 +12,8 @@ use synstructure::Structure;
 mod object;
 mod structure;
 
+use structure::{make_ty, write_coalesce_conv, write_unravel_conv};
+
 struct Metas {
     metas: Punctuated<NestedMeta, Token![,]>,
 }

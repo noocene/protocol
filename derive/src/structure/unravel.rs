@@ -147,7 +147,7 @@ fn conv_bindings(variant: &VariantInfo) -> TokenStream {
     }
 }
 
-fn make_conv(item: Structure) -> TokenStream {
+pub fn make_conv(item: Structure) -> TokenStream {
     match item.variants().len() {
         1 => conv_bindings(&item.variants()[0]),
         _ => {
