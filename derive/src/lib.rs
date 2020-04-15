@@ -210,7 +210,13 @@ pub fn protocol(
             }
             Item::Trait(data) => {
                 ident = Some(data.ident.clone());
-                object::generate(data)
+                if data.supertraits.len() > 0 {
+                    quote!(compile_error!(
+                        "invalid item: supertraits are not yet supported"
+                    ))
+                } else {
+                    object::generate(data)
+                }
             }
             _ => quote!(compile_error!(
                 "invalid item: expected struct, enum, or trait"
@@ -228,9 +234,10 @@ pub fn protocol(
     );
 
     (quote! {
-        #[allow(non_upper_case_globals)]
+        #[allow(non_upper_case_globals, unused_parens, non_camel_case_types)]
         const #item_ident: () = {
             extern crate protocol as __protocol;
+            extern crate alloc as __alloc;
 
             #imp
         };

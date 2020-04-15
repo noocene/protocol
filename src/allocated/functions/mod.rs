@@ -28,7 +28,6 @@ type JoinContextShared<O, C> = Jcs<C, O, fn(<C as ShareContext>::Context) -> O>;
         A: Error + 'static,
         T: Error + 'static,
         B: Error + 'static,
-        I: Error + 'static,
         U: Error + 'static,
         V: Error + 'static,
         W: Error + 'static,
@@ -37,7 +36,7 @@ type JoinContextShared<O, C> = Jcs<C, O, fn(<C as ShareContext>::Context) -> O>;
         F: Error + 'static,
         P: Error + 'static,
 )]
-pub enum FnUnravelError<A, B, C, Z, T, I, U, V, W, F, P> {
+pub enum FnUnravelError<A, B, C, Z, T, U, V, W, F, P> {
     #[error("failed to read argument handle for erased Fn: {0}")]
     Read(#[source] A),
     #[error("failed to join argument for erased Fn: {0}")]
@@ -52,8 +51,6 @@ pub enum FnUnravelError<A, B, C, Z, T, I, U, V, W, F, P> {
     Transport(#[source] T),
     #[error("failed to read handle for erased Fn: {0}")]
     ReadHandle(#[source] F),
-    #[error("failed to create notification wrapper for erased Fn return: {0}")]
-    Notify(#[source] I),
     #[error("failed to fork erased Fn return: {0}")]
     Dispatch(#[source] U),
     #[error("failed to target erased Fn return: {0}")]
@@ -79,22 +76,17 @@ pub type UnravelError<T, U, C> = FnUnravelError<
         <C as Write<<C as Contextualize>::Handle>>::Error,
     >,
     <RefContextTarget<RefContextTarget<C>> as Write<
-        <RefContextTarget<RefContextTarget<C>> as Dispatch<
-            <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Notification,
-        >>::Handle,
+        <RefContextTarget<RefContextTarget<C>> as Dispatch<U>>::Handle,
     >>::Error,
-    <<RefContextTarget<RefContextTarget<C>> as Notify<U>>::Wrap as Future<
+    <<RefContextTarget<RefContextTarget<C>> as Fork<U>>::Future as Future<
         RefContextTarget<RefContextTarget<C>>,
     >>::Error,
-    <<RefContextTarget<RefContextTarget<C>> as Fork<
-        <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Notification,
-    >>::Future as Future<RefContextTarget<RefContextTarget<C>>>>::Error,
-    <<RefContextTarget<RefContextTarget<C>> as Fork<
-        <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Notification,
-    >>::Target as Future<RefContextTarget<RefContextTarget<C>>>>::Error,
-    <<RefContextTarget<RefContextTarget<C>> as Fork<
-        <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Notification,
-    >>::Finalize as Future<RefContextTarget<RefContextTarget<C>>>>::Error,
+    <<RefContextTarget<RefContextTarget<C>> as Fork<U>>::Target as Future<
+        RefContextTarget<RefContextTarget<C>>,
+    >>::Error,
+    <<RefContextTarget<RefContextTarget<C>> as Fork<U>>::Finalize as Future<
+        RefContextTarget<RefContextTarget<C>>,
+    >>::Error,
     <RefContextTarget<C> as Read<Option<<RefContextTarget<C> as Contextualize>::Handle>>>::Error,
     <<RefContextTarget<C> as ReferenceContext>::JoinOutput as Future<RefContextTarget<C>>>::Error,
 >;
@@ -103,16 +95,12 @@ pub enum ErasedFnUnravelInstanceState<C: ?Sized + ReferenceContext, T, U>
 where
     RefContextTarget<C>: ReferenceContext,
     RefContextTarget<RefContextTarget<C>>: Notify<T>
-        + Notify<U>
+        + Fork<U>
         + Read<
             <RefContextTarget<RefContextTarget<C>> as Dispatch<
                 <RefContextTarget<RefContextTarget<C>> as Notify<T>>::Notification,
             >>::Handle,
-        > + Write<
-            <RefContextTarget<RefContextTarget<C>> as Dispatch<
-                <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Notification,
-            >>::Handle,
-        >,
+        > + Write<<RefContextTarget<RefContextTarget<C>> as Dispatch<U>>::Handle>,
 {
     Read,
     Join(
@@ -121,35 +109,14 @@ where
         >>::Future,
     ),
     Unwrap(<RefContextTarget<RefContextTarget<C>> as Notify<T>>::Unwrap),
-    Wrap(<RefContextTarget<RefContextTarget<C>> as Notify<U>>::Wrap),
-    Fork(
-        <RefContextTarget<RefContextTarget<C>> as Fork<
-            <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Notification,
-        >>::Future,
-    ),
+    Fork(<RefContextTarget<RefContextTarget<C>> as Fork<U>>::Future),
     Write(
-        <RefContextTarget<RefContextTarget<C>> as Fork<
-            <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Notification,
-        >>::Target,
-        <RefContextTarget<RefContextTarget<C>> as Dispatch<
-            <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Notification,
-        >>::Handle,
+        <RefContextTarget<RefContextTarget<C>> as Fork<U>>::Target,
+        <RefContextTarget<RefContextTarget<C>> as Dispatch<U>>::Handle,
     ),
-    Flush(
-        <RefContextTarget<RefContextTarget<C>> as Fork<
-            <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Notification,
-        >>::Target,
-    ),
-    Target(
-        <RefContextTarget<RefContextTarget<C>> as Fork<
-            <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Notification,
-        >>::Target,
-    ),
-    Finalize(
-        <RefContextTarget<RefContextTarget<C>> as Fork<
-            <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Notification,
-        >>::Finalize,
-    ),
+    Flush(<RefContextTarget<RefContextTarget<C>> as Fork<U>>::Target),
+    Target(<RefContextTarget<RefContextTarget<C>> as Fork<U>>::Target),
+    Finalize(<RefContextTarget<RefContextTarget<C>> as Fork<U>>::Finalize),
     Done,
 }
 
@@ -157,16 +124,12 @@ pub struct ErasedFnUnravelInstance<C: ?Sized + ReferenceContext, T, U, F, M>
 where
     RefContextTarget<C>: ReferenceContext,
     RefContextTarget<RefContextTarget<C>>: Notify<T>
-        + Notify<U>
+        + Fork<U>
         + Read<
             <RefContextTarget<RefContextTarget<C>> as Dispatch<
                 <RefContextTarget<RefContextTarget<C>> as Notify<T>>::Notification,
             >>::Handle,
-        > + Write<
-            <RefContextTarget<RefContextTarget<C>> as Dispatch<
-                <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Notification,
-            >>::Handle,
-        >,
+        > + Write<<RefContextTarget<RefContextTarget<C>> as Dispatch<U>>::Handle>,
 {
     state: ErasedFnUnravelInstanceState<C, T, U>,
     marker: PhantomData<(F, M)>,
@@ -177,16 +140,12 @@ impl<C: ?Sized + ReferenceContext, T, U, F, M> ErasedFnUnravelInstance<C, T, U, 
 where
     RefContextTarget<C>: ReferenceContext,
     RefContextTarget<RefContextTarget<C>>: Notify<T>
-        + Notify<U>
+        + Fork<U>
         + Read<
             <RefContextTarget<RefContextTarget<C>> as Dispatch<
                 <RefContextTarget<RefContextTarget<C>> as Notify<T>>::Notification,
             >>::Handle,
-        > + Write<
-            <RefContextTarget<RefContextTarget<C>> as Dispatch<
-                <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Notification,
-            >>::Handle,
-        >,
+        > + Write<<RefContextTarget<RefContextTarget<C>> as Dispatch<U>>::Handle>,
 {
     pub fn new(context: <RefContextTarget<C> as ReferenceContext>::Context) -> Self {
         ErasedFnUnravelInstance {
@@ -201,16 +160,12 @@ impl<C: ?Sized + ReferenceContext, T, U, F, M> Unpin for ErasedFnUnravelInstance
 where
     RefContextTarget<C>: ReferenceContext,
     RefContextTarget<RefContextTarget<C>>: Notify<T>
-        + Notify<U>
+        + Fork<U>
         + Read<
             <RefContextTarget<RefContextTarget<C>> as Dispatch<
                 <RefContextTarget<RefContextTarget<C>> as Notify<T>>::Notification,
             >>::Handle,
-        > + Write<
-            <RefContextTarget<RefContextTarget<C>> as Dispatch<
-                <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Notification,
-            >>::Handle,
-        >,
+        > + Write<<RefContextTarget<RefContextTarget<C>> as Dispatch<U>>::Handle>,
 {
 }
 
@@ -221,31 +176,20 @@ where
     RefContextTarget<C>:
         ReferenceContext + Read<Option<<RefContextTarget<C> as Contextualize>::Handle>>,
     RefContextTarget<RefContextTarget<C>>: Notify<T>
-        + Notify<U>
+        + Fork<U>
         + Read<
             <RefContextTarget<RefContextTarget<C>> as Dispatch<
                 <RefContextTarget<RefContextTarget<C>> as Notify<T>>::Notification,
             >>::Handle,
-        > + Write<
-            <RefContextTarget<RefContextTarget<C>> as Dispatch<
-                <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Notification,
-            >>::Handle,
-        >,
+        > + Write<<RefContextTarget<RefContextTarget<C>> as Dispatch<U>>::Handle>,
     RefContextTarget<RefContextTarget<C>>: Unpin,
     <RefContextTarget<RefContextTarget<C>> as Join<
         <RefContextTarget<RefContextTarget<C>> as Notify<T>>::Notification,
     >>::Future: Unpin,
     <RefContextTarget<RefContextTarget<C>> as Notify<T>>::Unwrap: Unpin,
-    <RefContextTarget<RefContextTarget<C>> as Fork<
-        <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Notification,
-    >>::Target: Unpin,
-    <RefContextTarget<RefContextTarget<C>> as Fork<
-        <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Notification,
-    >>::Finalize: Unpin,
-    <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Wrap: Unpin,
-    <RefContextTarget<RefContextTarget<C>> as Fork<
-        <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Notification,
-    >>::Future: Unpin,
+    <RefContextTarget<RefContextTarget<C>> as Fork<U>>::Target: Unpin,
+    <RefContextTarget<RefContextTarget<C>> as Fork<U>>::Finalize: Unpin,
+    <RefContextTarget<RefContextTarget<C>> as Fork<U>>::Future: Unpin,
 {
     fn poll<R: BorrowMut<RefContextTarget<C>>>(
         mut self: Pin<&mut Self>,
@@ -283,11 +227,6 @@ where
                     let item = ready!(Pin::new(future).poll(cx, &mut *ctx))
                         .map_err(FnUnravelError::Unwrap)?;
                     let item = (conv)(call, item);
-                    this.state = Wrap(ctx.wrap(item));
-                }
-                Wrap(future) => {
-                    let item = ready!(Pin::new(future).poll(cx, &mut *ctx))
-                        .map_err(FnUnravelError::Notify)?;
                     this.state = Fork(ctx.fork(item));
                 }
                 Fork(future) => {
@@ -337,31 +276,20 @@ enum ErasedFnUnravelState<C: ?Sized + Write<<C as Contextualize>::Handle> + Refe
 where
     RefContextTarget<C>: ReferenceContext,
     RefContextTarget<RefContextTarget<C>>: Notify<T>
-        + Notify<U>
+        + Fork<U>
         + Read<
             <RefContextTarget<RefContextTarget<C>> as Dispatch<
                 <RefContextTarget<RefContextTarget<C>> as Notify<T>>::Notification,
             >>::Handle,
-        > + Write<
-            <RefContextTarget<RefContextTarget<C>> as Dispatch<
-                <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Notification,
-            >>::Handle,
-        >,
+        > + Write<<RefContextTarget<RefContextTarget<C>> as Dispatch<U>>::Handle>,
     RefContextTarget<RefContextTarget<C>>: Unpin,
     <RefContextTarget<RefContextTarget<C>> as Join<
         <RefContextTarget<RefContextTarget<C>> as Notify<T>>::Notification,
     >>::Future: Unpin,
     <RefContextTarget<RefContextTarget<C>> as Notify<T>>::Unwrap: Unpin,
-    <RefContextTarget<RefContextTarget<C>> as Fork<
-        <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Notification,
-    >>::Target: Unpin,
-    <RefContextTarget<RefContextTarget<C>> as Fork<
-        <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Notification,
-    >>::Finalize: Unpin,
-    <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Wrap: Unpin,
-    <RefContextTarget<RefContextTarget<C>> as Fork<
-        <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Notification,
-    >>::Future: Unpin,
+    <RefContextTarget<RefContextTarget<C>> as Fork<U>>::Target: Unpin,
+    <RefContextTarget<RefContextTarget<C>> as Fork<U>>::Finalize: Unpin,
+    <RefContextTarget<RefContextTarget<C>> as Fork<U>>::Future: Unpin,
 {
     Read(PhantomData<(T, U)>),
     Contextualize(<RefContextTarget<C> as ReferenceContext>::JoinOutput),
@@ -379,31 +307,20 @@ pub struct ErasedFnUnravel<
     RefContextTarget<C>:
         ReferenceContext + Read<Option<<RefContextTarget<C> as Contextualize>::Handle>>,
     RefContextTarget<RefContextTarget<C>>: Notify<T>
-        + Notify<U>
+        + Fork<U>
         + Read<
             <RefContextTarget<RefContextTarget<C>> as Dispatch<
                 <RefContextTarget<RefContextTarget<C>> as Notify<T>>::Notification,
             >>::Handle,
-        > + Write<
-            <RefContextTarget<RefContextTarget<C>> as Dispatch<
-                <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Notification,
-            >>::Handle,
-        >,
+        > + Write<<RefContextTarget<RefContextTarget<C>> as Dispatch<U>>::Handle>,
     RefContextTarget<RefContextTarget<C>>: Unpin,
     <RefContextTarget<RefContextTarget<C>> as Join<
         <RefContextTarget<RefContextTarget<C>> as Notify<T>>::Notification,
     >>::Future: Unpin,
     <RefContextTarget<RefContextTarget<C>> as Notify<T>>::Unwrap: Unpin,
-    <RefContextTarget<RefContextTarget<C>> as Fork<
-        <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Notification,
-    >>::Target: Unpin,
-    <RefContextTarget<RefContextTarget<C>> as Fork<
-        <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Notification,
-    >>::Finalize: Unpin,
-    <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Wrap: Unpin,
-    <RefContextTarget<RefContextTarget<C>> as Fork<
-        <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Notification,
-    >>::Future: Unpin,
+    <RefContextTarget<RefContextTarget<C>> as Fork<U>>::Target: Unpin,
+    <RefContextTarget<RefContextTarget<C>> as Fork<U>>::Finalize: Unpin,
+    <RefContextTarget<RefContextTarget<C>> as Fork<U>>::Future: Unpin,
 {
     call: M,
     pending: Vec<ErasedFnUnravelInstance<C, T, U, F, M>>,
@@ -419,31 +336,20 @@ where
     RefContextTarget<C>:
         ReferenceContext + Read<Option<<RefContextTarget<C> as Contextualize>::Handle>>,
     RefContextTarget<RefContextTarget<C>>: Notify<T>
-        + Notify<U>
+        + Fork<U>
         + Read<
             <RefContextTarget<RefContextTarget<C>> as Dispatch<
                 <RefContextTarget<RefContextTarget<C>> as Notify<T>>::Notification,
             >>::Handle,
-        > + Write<
-            <RefContextTarget<RefContextTarget<C>> as Dispatch<
-                <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Notification,
-            >>::Handle,
-        >,
+        > + Write<<RefContextTarget<RefContextTarget<C>> as Dispatch<U>>::Handle>,
     RefContextTarget<RefContextTarget<C>>: Unpin,
     <RefContextTarget<RefContextTarget<C>> as Join<
         <RefContextTarget<RefContextTarget<C>> as Notify<T>>::Notification,
     >>::Future: Unpin,
     <RefContextTarget<RefContextTarget<C>> as Notify<T>>::Unwrap: Unpin,
-    <RefContextTarget<RefContextTarget<C>> as Fork<
-        <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Notification,
-    >>::Target: Unpin,
-    <RefContextTarget<RefContextTarget<C>> as Fork<
-        <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Notification,
-    >>::Finalize: Unpin,
-    <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Wrap: Unpin,
-    <RefContextTarget<RefContextTarget<C>> as Fork<
-        <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Notification,
-    >>::Future: Unpin,
+    <RefContextTarget<RefContextTarget<C>> as Fork<U>>::Target: Unpin,
+    <RefContextTarget<RefContextTarget<C>> as Fork<U>>::Finalize: Unpin,
+    <RefContextTarget<RefContextTarget<C>> as Fork<U>>::Future: Unpin,
 {
 }
 
@@ -454,31 +360,20 @@ where
     RefContextTarget<C>:
         ReferenceContext + Read<Option<<RefContextTarget<C> as Contextualize>::Handle>>,
     RefContextTarget<RefContextTarget<C>>: Notify<T>
-        + Notify<U>
+        + Fork<U>
         + Read<
             <RefContextTarget<RefContextTarget<C>> as Dispatch<
                 <RefContextTarget<RefContextTarget<C>> as Notify<T>>::Notification,
             >>::Handle,
-        > + Write<
-            <RefContextTarget<RefContextTarget<C>> as Dispatch<
-                <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Notification,
-            >>::Handle,
-        >,
+        > + Write<<RefContextTarget<RefContextTarget<C>> as Dispatch<U>>::Handle>,
     RefContextTarget<RefContextTarget<C>>: Unpin,
     <RefContextTarget<RefContextTarget<C>> as Join<
         <RefContextTarget<RefContextTarget<C>> as Notify<T>>::Notification,
     >>::Future: Unpin,
     <RefContextTarget<RefContextTarget<C>> as Notify<T>>::Unwrap: Unpin,
-    <RefContextTarget<RefContextTarget<C>> as Fork<
-        <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Notification,
-    >>::Target: Unpin,
-    <RefContextTarget<RefContextTarget<C>> as Fork<
-        <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Notification,
-    >>::Finalize: Unpin,
-    <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Wrap: Unpin,
-    <RefContextTarget<RefContextTarget<C>> as Fork<
-        <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Notification,
-    >>::Future: Unpin,
+    <RefContextTarget<RefContextTarget<C>> as Fork<U>>::Target: Unpin,
+    <RefContextTarget<RefContextTarget<C>> as Fork<U>>::Finalize: Unpin,
+    <RefContextTarget<RefContextTarget<C>> as Fork<U>>::Future: Unpin,
     RefContextTarget<C>: Unpin,
     <RefContextTarget<C> as ReferenceContext>::JoinOutput: Unpin,
 {
@@ -548,9 +443,9 @@ where
 pub enum ErasedFnCoalesceState<T, U, C: CloneContext + Write<Option<<C as Contextualize>::Handle>>>
 where
     C::Context: Notify<T>
-        + Notify<U>
+        + Join<U>
         + Write<<C::Context as Dispatch<<C::Context as Notify<T>>::Notification>>::Handle>
-        + Read<<C::Context as Dispatch<<C::Context as Notify<U>>::Notification>>::Handle>
+        + Read<<C::Context as Dispatch<U>>::Handle>
         + Finalize<<C::Context as Fork<<C::Context as Notify<T>>::Notification>>::Finalize>,
     <C::Context as Fork<<C::Context as Notify<T>>::Notification>>::Finalize: Future<
         <C::Context as Finalize<
@@ -576,8 +471,7 @@ where
         >>::Output,
     ),
     Read,
-    Join(<C::Context as Join<<C::Context as Notify<U>>::Notification>>::Future),
-    Unwrap(<C::Context as Notify<U>>::Unwrap),
+    Join(<C::Context as Join<U>>::Future),
     Done,
 }
 
@@ -587,9 +481,9 @@ pub struct ErasedFnCoalesce<
     C: Clone + CloneContext + Write<Option<<C as Contextualize>::Handle>>,
 > where
     C::Context: Notify<T>
-        + Notify<U>
+        + Join<U>
         + Write<<C::Context as Dispatch<<C::Context as Notify<T>>::Notification>>::Handle>
-        + Read<<C::Context as Dispatch<<C::Context as Notify<U>>::Notification>>::Handle>
+        + Read<<C::Context as Dispatch<U>>::Handle>
         + Finalize<<C::Context as Fork<<C::Context as Notify<T>>::Notification>>::Finalize>,
     <C::Context as Fork<<C::Context as Notify<T>>::Notification>>::Finalize: Future<
         <C::Context as Finalize<
@@ -607,9 +501,9 @@ impl<T, U, C: Clone + CloneContext + Write<Option<<C as Contextualize>::Handle>>
     for ErasedFnCoalesce<T, U, C>
 where
     C::Context: Notify<T>
-        + Notify<U>
+        + Join<U>
         + Write<<C::Context as Dispatch<<C::Context as Notify<T>>::Notification>>::Handle>
-        + Read<<C::Context as Dispatch<<C::Context as Notify<U>>::Notification>>::Handle>
+        + Read<<C::Context as Dispatch<U>>::Handle>
         + Finalize<<C::Context as Fork<<C::Context as Notify<T>>::Notification>>::Finalize>,
     <C::Context as Fork<<C::Context as Notify<T>>::Notification>>::Finalize: Future<
         <C::Context as Finalize<
@@ -625,7 +519,6 @@ where
     A: Error + 'static,
     T: Error + 'static,
     B: Error + 'static,
-    I: Error + 'static,
     U: Error + 'static,
     V: Error + 'static,
     W: Error + 'static,
@@ -633,7 +526,7 @@ where
     K: Error + 'static,
     L: Error + 'static,
 )]
-pub enum ErasedFnCoalesceError<A, C, B, T, I, U, V, W, K, L> {
+pub enum ErasedFnCoalesceError<A, C, B, T, U, V, W, K, L> {
     #[error("failed to write argument handle for erased Fn: {0}")]
     Write(#[source] A),
     #[error("failed to fork argument for erased Fn: {0}")]
@@ -642,8 +535,6 @@ pub enum ErasedFnCoalesceError<A, C, B, T, I, U, V, W, K, L> {
     Wrap(#[source] B),
     #[error("failed to read handle for erased Fn return: {0}")]
     Read(#[source] T),
-    #[error("failed to create notification wrapper for erased Fn return: {0}")]
-    Unwrap(#[source] I),
     #[error("failed to join erased Fn return: {0}")]
     Join(#[source] U),
     #[error("failed to target erased Fn argument: {0}")]
@@ -666,15 +557,8 @@ type CoalesceError<T, U, C> = ErasedFnCoalesceError<
         <<C as CloneContext>::Context as Notify<T>>::Notification,
     >>::Future as Future<<C as CloneContext>::Context>>::Error,
     <<<C as CloneContext>::Context as Notify<T>>::Wrap as Future<<C as CloneContext>::Context>>::Error,
-    <<C as CloneContext>::Context as Read<
-        <<C as CloneContext>::Context as Dispatch<
-            <<C as CloneContext>::Context as Notify<U>>::Notification,
-        >>::Handle,
-    >>::Error,
-    <<<C as CloneContext>::Context as Notify<U>>::Unwrap as Future<<C as CloneContext>::Context>>::Error,
-    <<<C as CloneContext>::Context as Join<
-        <<C as CloneContext>::Context as Notify<U>>::Notification,
-    >>::Future as Future<<C as CloneContext>::Context>>::Error,
+    <<C as CloneContext>::Context as Read<<<C as CloneContext>::Context as Dispatch<U>>::Handle>>::Error,
+    <<<C as CloneContext>::Context as Join<U>>::Future as Future<<C as CloneContext>::Context>>::Error,
     <<<C as CloneContext>::Context as Fork<
         <<C as CloneContext>::Context as Notify<T>>::Notification,
     >>::Target as Future<<C as CloneContext>::Context>>::Error,
@@ -691,9 +575,9 @@ impl<T, U, C: Clone + CloneContext + Write<Option<<C as Contextualize>::Handle>>
     for ErasedFnCoalesce<T, U, C>
 where
     C::Context: Notify<T>
-        + Notify<U>
+        + Join<U>
         + Write<<C::Context as Dispatch<<C::Context as Notify<T>>::Notification>>::Handle>
-        + Read<<C::Context as Dispatch<<C::Context as Notify<U>>::Notification>>::Handle>
+        + Read<<C::Context as Dispatch<U>>::Handle>
         + Finalize<<C::Context as Fork<<C::Context as Notify<T>>::Notification>>::Finalize>,
     <C::Context as Fork<<C::Context as Notify<T>>::Notification>>::Finalize: Future<
         <C::Context as Finalize<
@@ -710,16 +594,10 @@ where
     >>::Future as Future<<C as CloneContext>::Context>>::Error: Send + Error + 'static,
     <<<C as CloneContext>::Context as Notify<T>>::Wrap as Future<<C as CloneContext>::Context>>::Error:
         Send + Error + 'static,
-    <<C as CloneContext>::Context as Read<
-        <<C as CloneContext>::Context as Dispatch<
-            <<C as CloneContext>::Context as Notify<U>>::Notification,
-        >>::Handle,
-    >>::Error: Send + Error + 'static,
-    <<<C as CloneContext>::Context as Notify<U>>::Unwrap as Future<<C as CloneContext>::Context>>::Error:
+    <<C as CloneContext>::Context as Read<<<C as CloneContext>::Context as Dispatch<U>>::Handle>>::Error:
         Send + Error + 'static,
-    <<<C as CloneContext>::Context as Join<
-        <<C as CloneContext>::Context as Notify<U>>::Notification,
-    >>::Future as Future<<C as CloneContext>::Context>>::Error: Send + Error + 'static,
+    <<<C as CloneContext>::Context as Join<U>>::Future as Future<<C as CloneContext>::Context>>::Error:
+        Send + Error + 'static,
     <<<C as CloneContext>::Context as Fork<
         <<C as CloneContext>::Context as Notify<T>>::Notification,
     >>::Target as Future<<C as CloneContext>::Context>>::Error: Send + Error + 'static,
@@ -735,13 +613,10 @@ where
         >>::Finalize,
     >>::Output: Unpin,
     <<C as CloneContext>::Context as Notify<T>>::Wrap: Unpin,
-    <<C as CloneContext>::Context as Notify<U>>::Unwrap: Unpin,
     <<C as CloneContext>::Context as Fork<
         <<C as CloneContext>::Context as Notify<T>>::Notification,
     >>::Future: Unpin,
-    <<C as CloneContext>::Context as Join<
-        <<C as CloneContext>::Context as Notify<U>>::Notification,
-    >>::Future: Unpin,
+    <<C as CloneContext>::Context as Join<U>>::Future: Unpin,
     <<C as CloneContext>::Context as Fork<
         <<C as CloneContext>::Context as Notify<T>>::Notification,
     >>::Target: Unpin,
@@ -848,26 +723,17 @@ where
                 }
                 Read => {
                     let ctx = this.loc_context.as_mut().unwrap();
-                    let handle: <C::Context as Dispatch<
-                        <C::Context as Notify<U>>::Notification,
-                    >>::Handle = ready!(Pin::new(&mut *ctx).read(cx))
-                        .map_err(|e| ProtocolError::new(CoalesceError::<T, U, C>::Read(e)))?;
-                    let join: <C::Context as crate::Join<<C::Context as Notify<U>>::Notification>>::Future =
-                        crate::Join::<<C::Context as Notify<U>>::Notification>::join(ctx, handle);
+                    let handle: <C::Context as Dispatch<U>>::Handle =
+                        ready!(Pin::new(&mut *ctx).read(cx))
+                            .map_err(|e| ProtocolError::new(CoalesceError::<T, U, C>::Read(e)))?;
+                    let join: <C::Context as crate::Join<U>>::Future =
+                        crate::Join::<U>::join(ctx, handle);
                     this.state = Join(join);
                 }
                 Join(future) => {
                     let ctx = this.loc_context.as_mut().unwrap();
-                    let wrapped = ready!(Pin::new(future).poll(cx, &mut *ctx))
-                        .map_err(|e| ProtocolError::new(CoalesceError::<T, U, C>::Join(e)))?;
-                    let unwrap: <C::Context as Notify<U>>::Unwrap =
-                        Notify::<U>::unwrap(ctx, wrapped);
-                    this.state = Unwrap(unwrap);
-                }
-                Unwrap(future) => {
-                    let ctx = this.loc_context.as_mut().unwrap();
                     let data = ready!(Pin::new(future).poll(cx, &mut *ctx))
-                        .map_err(|e| ProtocolError::new(CoalesceError::<T, U, C>::Unwrap(e)))?;
+                        .map_err(|e| ProtocolError::new(CoalesceError::<T, U, C>::Join(e)))?;
                     this.state = Done;
                     return Poll::Ready(Ok(data));
                 }
@@ -941,9 +807,9 @@ impl<
 where
     C::Target: Unpin + CloneContext + Write<Option<<C::Target as Contextualize>::Handle>>,
     C::Context: Notify<T>
-        + Notify<U>
+        + Join<U>
         + Write<<C::Context as Dispatch<<C::Context as Notify<T>>::Notification>>::Handle>
-        + Read<<C::Context as Dispatch<<C::Context as Notify<U>>::Notification>>::Handle>
+        + Read<<C::Context as Dispatch<U>>::Handle>
         + Finalize<<C::Context as Fork<<C::Context as Notify<T>>::Notification>>::Finalize>,
     <C::Context as Fork<<C::Context as Notify<T>>::Notification>>::Finalize: Future<
         <C::Context as Finalize<
@@ -960,16 +826,10 @@ where
     >>::Future as Future<<C as CloneContext>::Context>>::Error: Send + Error + 'static,
     <<<C as CloneContext>::Context as Notify<T>>::Wrap as Future<<C as CloneContext>::Context>>::Error:
         Send + Error + 'static,
-    <<C as CloneContext>::Context as Read<
-        <<C as CloneContext>::Context as Dispatch<
-            <<C as CloneContext>::Context as Notify<U>>::Notification,
-        >>::Handle,
-    >>::Error: Send + Error + 'static,
-    <<<C as CloneContext>::Context as Notify<U>>::Unwrap as Future<<C as CloneContext>::Context>>::Error:
+    <<C as CloneContext>::Context as Read<<<C as CloneContext>::Context as Dispatch<U>>::Handle>>::Error:
         Send + Error + 'static,
-    <<<C as CloneContext>::Context as Join<
-        <<C as CloneContext>::Context as Notify<U>>::Notification,
-    >>::Future as Future<<C as CloneContext>::Context>>::Error: Send + Error + 'static,
+    <<<C as CloneContext>::Context as Join<U>>::Future as Future<<C as CloneContext>::Context>>::Error:
+        Send + Error + 'static,
     <<<C as CloneContext>::Context as Fork<
         <<C as CloneContext>::Context as Notify<T>>::Notification,
     >>::Target as Future<<C as CloneContext>::Context>>::Error: Send + Error + 'static,
@@ -985,13 +845,10 @@ where
         >>::Finalize,
     >>::Output: Unpin,
     <<C as CloneContext>::Context as Notify<T>>::Wrap: Unpin,
-    <<C as CloneContext>::Context as Notify<U>>::Unwrap: Unpin,
     <<C as CloneContext>::Context as Fork<
         <<C as CloneContext>::Context as Notify<T>>::Notification,
     >>::Future: Unpin,
-    <<C as CloneContext>::Context as Join<
-        <<C as CloneContext>::Context as Notify<U>>::Notification,
-    >>::Future: Unpin,
+    <<C as CloneContext>::Context as Join<U>>::Future: Unpin,
     <<C as CloneContext>::Context as Fork<
         <<C as CloneContext>::Context as Notify<T>>::Notification,
     >>::Target: Unpin,
@@ -1045,14 +902,14 @@ macro_rules! tuple_impls {
                     >,
                 ($($name,)*): 'a $(+ $marker)*,
                 <C::Context as CloneContext>::Context: Notify<($($name,)*)>
-                    + Notify<U>
+                    + Join<U>
                     + Write<
                         <<C::Context as CloneContext>::Context as Dispatch<
                             <<C::Context as CloneContext>::Context as Notify<($($name,)*)>>::Notification,
                         >>::Handle,
                     > + Read<
                         <<C::Context as CloneContext>::Context as Dispatch<
-                            <<C::Context as CloneContext>::Context as Notify<U>>::Notification,
+                            U,
                         >>::Handle,
                     > + Finalize<
                         <<C::Context as CloneContext>::Context as Fork<
@@ -1081,14 +938,11 @@ macro_rules! tuple_impls {
                 >>::Error: Send + Error + 'static,
                 <<C::Context as CloneContext>::Context as Read<
                     <<C::Context as CloneContext>::Context as Dispatch<
-                        <<C::Context as CloneContext>::Context as Notify<U>>::Notification,
+                        U,
                     >>::Handle,
                 >>::Error: Send + Error + 'static,
-                <<<C::Context as CloneContext>::Context as Notify<U>>::Unwrap as Future<
-                    <C::Context as CloneContext>::Context,
-                >>::Error: Send + Error + 'static,
                 <<<C::Context as CloneContext>::Context as Join<
-                    <<C::Context as CloneContext>::Context as Notify<U>>::Notification,
+                    U,
                 >>::Future as Future<<C::Context as CloneContext>::Context>>::Error: Send + Error + 'static,
                 <<<C::Context as CloneContext>::Context as Fork<
                     <<C::Context as CloneContext>::Context as Notify<($($name,)*)>>::Notification,
@@ -1105,12 +959,11 @@ macro_rules! tuple_impls {
                     >>::Finalize,
                 >>::Output: Unpin,
                 <<C::Context as CloneContext>::Context as Notify<($($name,)*)>>::Wrap: Unpin,
-                <<C::Context as CloneContext>::Context as Notify<U>>::Unwrap: Unpin,
                 <<C::Context as CloneContext>::Context as Fork<
                     <<C::Context as CloneContext>::Context as Notify<($($name,)*)>>::Notification,
                 >>::Future: Unpin,
                 <<C::Context as CloneContext>::Context as Join<
-                    <<C::Context as CloneContext>::Context as Notify<U>>::Notification,
+                    U,
                 >>::Future: Unpin,
                 <<C::Context as CloneContext>::Context as Fork<
                     <<C::Context as CloneContext>::Context as Notify<($($name,)*)>>::Notification,
@@ -1154,14 +1007,14 @@ macro_rules! tuple_impls {
                 RefContextTarget<C>: ReferenceContext
                     + Read<Option<<RefContextTarget<C> as Contextualize>::Handle>>,
                 RefContextTarget<RefContextTarget<C>>: Notify<($($name,)*)>
-                    + Notify<U>
+                    + Fork<U>
                     + Read<
                         <RefContextTarget<RefContextTarget<C>> as Dispatch<
                             <RefContextTarget<RefContextTarget<C>> as Notify<($($name,)*)>>::Notification,
                         >>::Handle,
                     > + Write<
                         <RefContextTarget<RefContextTarget<C>> as Dispatch<
-                            <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Notification,
+                            U,
                         >>::Handle,
                     >,
                 RefContextTarget<RefContextTarget<C>>: Unpin,
@@ -1170,14 +1023,13 @@ macro_rules! tuple_impls {
                 >>::Future: Unpin,
                 <RefContextTarget<RefContextTarget<C>> as Notify<($($name,)*)>>::Unwrap: Unpin,
                 <RefContextTarget<RefContextTarget<C>> as Fork<
-                    <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Notification,
+                    U,
                 >>::Target: Unpin,
                 <RefContextTarget<RefContextTarget<C>> as Fork<
-                    <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Notification,
+                    U,
                 >>::Finalize: Unpin,
-                <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Wrap: Unpin,
                 <RefContextTarget<RefContextTarget<C>> as Fork<
-                    <RefContextTarget<RefContextTarget<C>> as Notify<U>>::Notification,
+                    U,
                 >>::Future: Unpin,
                 C::ForkOutput: Unpin,
                 C: Unpin,
