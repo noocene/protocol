@@ -1,7 +1,7 @@
 use super::rewrite_ty;
 use proc_macro2::TokenStream;
-use quote::{format_ident, quote};
-use syn::{parse_quote, FnArg, GenericParam, ItemTrait, ReturnType, TraitItem};
+use quote::{format_ident, quote, quote_spanned};
+use syn::{parse_quote, FnArg, GenericParam, ItemTrait, ReturnType, TraitItem, spanned::Spanned};
 
 pub fn generate(mut item: ItemTrait) -> TokenStream {
     let ident = &item.ident;
@@ -112,7 +112,15 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
             let ret = match &method.sig.output {
                 ReturnType::Default => quote!(()),
                 ReturnType::Type(_, ty) => {
-                    let ty = rewrite_ty(*ty.clone(), &self_ty);
+                    let span = ty.span();
+
+                    let ty = if let Some(ty) = rewrite_ty(*ty.clone(), &self_ty) {
+                        ty
+                    } else {
+                        return quote_spanned!(span => const __DERIVE_ERROR: () = { compile_error!(
+                            "object-safe traits cannot use the `Self` type"
+                        ); };);
+                    };
                     quote!(#ty)
                 }
             };
@@ -129,16 +137,30 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
                 .collect();
 
             for ty in &arg_tys {
+                let span = ty.span();
                 let pat = *ty.pat.clone();
                 bindings.extend(quote!(#pat,));
-                let ty = rewrite_ty((*ty.ty).clone(), &self_ty);
+                let ty = if let Some(ty) = rewrite_ty((*ty.ty).clone(), &self_ty) {
+                    ty
+                } else {
+                    return quote_spanned!(span => const __DERIVE_ERROR: () = { compile_error!(
+                        "object-safe traits cannot use the `Self` type"
+                    ); };);
+                };
                 r_args.extend(quote!(#ty,));
             }
 
             let get_context = if moves {
                 for ty in &arg_tys {
+                    let span = ty.span();
                     let ident = format_ident!("T{}", format!("{}", ident_idx));
-                    let ty = rewrite_ty((*ty.ty).clone(), &self_ty);
+                    let ty = if let Some(ty) = rewrite_ty((*ty.ty).clone(), &self_ty) {
+                        ty
+                    } else {
+                        return quote_spanned!(span => const __DERIVE_ERROR: () = { compile_error!(
+                            "object-safe traits cannot use the `Self` type"
+                        ); };);
+                    };
                     ident_idx += 1;
                     r_generics.extend(quote!(#ty,));
 
@@ -301,12 +323,14 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
     for (ident, moves, get_context, ret, sig, r_args, bindings) in logic {
         let logic = if moves {
             quote!(<#ret as __protocol::allocated::Flatten<__protocol::allocated::ProtocolError, __protocol::derive_deps::MoveCoalesce<(#r_args), #ret, __DERIVE_PROTOCOL_TRANSPORT, _, _>>>::flatten(__protocol::derive_deps::MoveCoalesce::new(context, (#bindings), |handle| {
-                __DERIVE_CALL::<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>::#ident(handle).into()
+                let a: __DERIVE_CALL_NEWTYPE<__DERIVE_CALL_ALIAS<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>> = __DERIVE_CALL::<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>::#ident(handle).into();
+                a.0
             })))
         } else {
             quote! {
                 <#ret as __protocol::allocated::Flatten<__protocol::allocated::ProtocolError, __protocol::derive_deps::BorrowCoalesce<(#r_args), #ret, __DERIVE_PROTOCOL_TRANSPORT, _, _>>>::flatten(__protocol::derive_deps::BorrowCoalesce::new(context, (#bindings), |handle| {
-                    __DERIVE_CALL::<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>::#ident(handle).into()
+                    let a: __DERIVE_CALL_NEWTYPE<__DERIVE_CALL_ALIAS<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>> = __DERIVE_CALL::<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>::#ident(handle).into();
+                    a.0
                 }))
             }
         };
@@ -586,7 +610,8 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
             impl #assoc_only Drop for __DERIVE_COALESCE_SHIM #assoc_only where __DERIVE_PROTOCOL_TRANSPORT: __protocol::FinalizeImmediate<__protocol::derive_deps::Complete<__DERIVE_CALL_ALIAS<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>>> #d_context_bounds, <__DERIVE_PROTOCOL_TRANSPORT as __protocol::FinalizeImmediate<__protocol::derive_deps::Complete<__DERIVE_CALL_ALIAS<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>>>>::Target: __protocol::Write<__DERIVE_CALL_ALIAS<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>> + ::core::marker::Unpin {
                 fn drop(&mut self) {
                     if let Some(context) = self.1.as_mut() {
-                        __protocol::derive_deps::Complete::complete::<__DERIVE_PROTOCOL_TRANSPORT, _>(context, __DERIVE_CALL::<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>::__DERIVE_TERMINATE.into());
+                        let a: __DERIVE_CALL_NEWTYPE<__DERIVE_CALL_ALIAS<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>> = __DERIVE_CALL::<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>::__DERIVE_TERMINATE.into();
+                        __protocol::derive_deps::Complete::complete::<__DERIVE_PROTOCOL_TRANSPORT, _>(context, a.0);
                     }
                 }
             }

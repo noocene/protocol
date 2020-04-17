@@ -1,7 +1,7 @@
 use super::rewrite_ty;
 use proc_macro2::TokenStream;
-use quote::{format_ident, quote};
-use syn::{parse_quote, FnArg, GenericParam, ItemTrait, TraitItem, ReturnType};
+use quote::{format_ident, quote, quote_spanned};
+use syn::{parse_quote, FnArg, GenericParam, ItemTrait, TraitItem, ReturnType, spanned::Spanned};
 
 pub fn generate(mut item: ItemTrait) -> TokenStream {
     let mut has_methods = false;
@@ -45,7 +45,15 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
             let ret = match &method.sig.output {
                 ReturnType::Default => quote!(()),
                 ReturnType::Type(_, ty) => {
-                    let ty = rewrite_ty(*ty.clone(), &self_ty);
+                    let span = ty.span();
+
+                    let ty = if let Some(ty) = rewrite_ty(*ty.clone(), &self_ty) {
+                        ty
+                    } else {
+                        return quote_spanned!(span => const __DERIVE_ERROR: () = { compile_error!(
+                            "object-safe traits cannot use the `Self` type"
+                        ); };);
+                    };
                     quote!(#ty)
                 }
             };
@@ -60,8 +68,15 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
                     _ => None,
                 })
             {
+                let span = ty.span();
                 let pat = &ty.pat;
-                let ty = rewrite_ty((*ty.ty).clone(), &self_ty);
+                let ty = if let Some(ty) = rewrite_ty((*ty.ty).clone(), &self_ty) {
+                    ty
+                } else {
+                    return quote_spanned!(span => const __DERIVE_ERROR: () = { compile_error!(
+                        "object-safe traits cannot use the `Self` type"
+                    ); };);
+                };
                 if moves {
                     r_generics.extend(quote!(#ty,));
                 }
@@ -384,7 +399,9 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
                     __DERIVE_READ: __protocol::derive_deps::Error + 'static,
                     #error_params
             )]
-            #vis enum __DERIVE_UNRAVEL_ERROR<__DERIVE_FORK_CONTEXT, __DERIVE_READ, #error_param_names> {
+            #vis enum __DERIVE_UNRAVEL_ERROR<__ERROR_PHANTOM: ::core::fmt::Debug, __DERIVE_FORK_CONTEXT, __DERIVE_READ, #error_param_names> {
+                #[error("invalid error outcome")]
+                __DERIVE_PHANTOM(__ERROR_PHANTOM),
                 #[error("failed to contextualize erased object: {0}")]
                 Contextualize(#[source] __DERIVE_FORK_CONTEXT),
                 #[error("failed to read item handle in erased object: {0}")]
@@ -393,6 +410,7 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
             }
 
             type __DERIVE_ERROR_ALIAS<__DERIVE_PROTOCOL_TRANSPORT, #a_type_generics> = __DERIVE_UNRAVEL_ERROR<
+                ::core::marker::PhantomData<(#a_type_generics)>,
                 __protocol::ForkContextRefError<
                     <<__DERIVE_PROTOCOL_TRANSPORT as __protocol::ReferenceContext>::ForkOutput as __protocol::Future<__DERIVE_PROTOCOL_TRANSPORT>>::Error,
                     <__DERIVE_PROTOCOL_TRANSPORT as __protocol::Write<<__DERIVE_PROTOCOL_TRANSPORT as __protocol::Contextualize>::Handle>>::Error,

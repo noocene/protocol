@@ -1,25 +1,25 @@
 use crate::{make_ty, write_coalesce_conv, write_unravel_conv};
 use proc_macro2::TokenStream;
-use quote::{format_ident, quote};
+use quote::{format_ident, quote, quote_spanned};
 use syn::{
-    parse2, parse_quote, Data, DataEnum, DeriveInput, FnArg, GenericArgument, ItemEnum, ItemTrait,
-    PathArguments, ReturnType, TraitItem, Type, TypeParamBound,
+    parse2, parse_quote, spanned::Spanned, Data, DataEnum, DeriveInput, FnArg, GenericArgument,
+    Item, ItemEnum, ItemTrait, PathArguments, ReturnType, TraitItem, Type, TypeParamBound,
 };
 use synstructure::{BindStyle, Structure};
 
 mod coalesce;
 mod unravel;
 
-fn rewrite_ty(mut ty: Type, self_ty: &TokenStream) -> Type {
+fn rewrite_ty(mut ty: Type, self_ty: &TokenStream) -> Option<Type> {
     match &mut ty {
         Type::Array(array) => {
-            *array.elem = rewrite_ty(*array.elem.clone(), &self_ty);
+            *array.elem = rewrite_ty(*array.elem.clone(), &self_ty)?;
         }
         Type::Group(group) => {
-            *group.elem = rewrite_ty(*group.elem.clone(), &self_ty);
+            *group.elem = rewrite_ty(*group.elem.clone(), &self_ty)?;
         }
         Type::Paren(paren) => {
-            *paren.elem = rewrite_ty(*paren.elem.clone(), &self_ty);
+            *paren.elem = rewrite_ty(*paren.elem.clone(), &self_ty)?;
         }
         Type::TraitObject(object) => {
             for bound in &mut object.bounds {
@@ -27,7 +27,7 @@ fn rewrite_ty(mut ty: Type, self_ty: &TokenStream) -> Type {
                     TypeParamBound::Trait(bound) => {
                         let path = bound.path.clone();
                         let ty: Type = parse_quote!(#path);
-                        let path = rewrite_ty(ty, &self_ty);
+                        let path = rewrite_ty(ty, &self_ty)?;
                         bound.path = parse_quote!(#path);
                     }
                     _ => {}
@@ -36,7 +36,7 @@ fn rewrite_ty(mut ty: Type, self_ty: &TokenStream) -> Type {
         }
         Type::Path(path) => {
             if let Some(qself) = &mut path.qself {
-                *qself.ty = rewrite_ty(*qself.ty.clone(), &self_ty)
+                *qself.ty = rewrite_ty(*qself.ty.clone(), &self_ty)?
             }
 
             for segment in &mut path.path.segments {
@@ -45,10 +45,10 @@ fn rewrite_ty(mut ty: Type, self_ty: &TokenStream) -> Type {
                         for arg in &mut args.args {
                             match arg {
                                 GenericArgument::Type(ty) => {
-                                    *ty = rewrite_ty(ty.clone(), &self_ty);
+                                    *ty = rewrite_ty(ty.clone(), &self_ty)?;
                                 }
                                 GenericArgument::Binding(binding) => {
-                                    binding.ty = rewrite_ty(binding.ty.clone(), &self_ty);
+                                    binding.ty = rewrite_ty(binding.ty.clone(), &self_ty)?;
                                 }
                                 GenericArgument::Constraint(constraint) => {
                                     for bound in &mut constraint.bounds {
@@ -56,7 +56,7 @@ fn rewrite_ty(mut ty: Type, self_ty: &TokenStream) -> Type {
                                             TypeParamBound::Trait(bound) => {
                                                 let path = bound.path.clone();
                                                 let ty: Type = parse_quote!(#path);
-                                                let path = rewrite_ty(ty, &self_ty);
+                                                let path = rewrite_ty(ty, &self_ty)?;
                                                 bound.path = parse_quote!(#path);
                                             }
                                             _ => {}
@@ -69,11 +69,11 @@ fn rewrite_ty(mut ty: Type, self_ty: &TokenStream) -> Type {
                     }
                     PathArguments::Parenthesized(args) => {
                         for input in &mut args.inputs {
-                            *input = rewrite_ty(input.clone(), &self_ty);
+                            *input = rewrite_ty(input.clone(), &self_ty)?;
                         }
                         match &mut args.output {
                             ReturnType::Type(_, ty) => {
-                                *ty.as_mut() = rewrite_ty(*ty.clone(), &self_ty)
+                                *ty.as_mut() = rewrite_ty(*ty.clone(), &self_ty)?
                             }
                             _ => {}
                         }
@@ -83,9 +83,13 @@ fn rewrite_ty(mut ty: Type, self_ty: &TokenStream) -> Type {
             }
 
             let p = if let Some(segment) = path.path.segments.iter().next() {
-                if format!("{}", segment.ident) == "Self" && path.path.segments.len() > 1 {
-                    let ident = format_ident!("__DERIVE_ASSOC_{}", path.path.segments[1].ident);
-                    parse_quote!(#ident)
+                if format!("{}", segment.ident) == "Self" {
+                    if path.path.segments.len() > 1 {
+                        let ident = format_ident!("__DERIVE_ASSOC_{}", path.path.segments[1].ident);
+                        parse_quote!(#ident)
+                    } else {
+                        return None;
+                    }
                 } else {
                     parse_quote!(#path)
                 }
@@ -96,23 +100,23 @@ fn rewrite_ty(mut ty: Type, self_ty: &TokenStream) -> Type {
             *path = p;
         }
         Type::Ptr(ptr) => {
-            *ptr.elem = rewrite_ty(*ptr.elem.clone(), &self_ty);
+            *ptr.elem = rewrite_ty(*ptr.elem.clone(), &self_ty)?;
         }
         Type::Reference(reference) => {
-            *reference.elem = rewrite_ty(*reference.elem.clone(), &self_ty);
+            *reference.elem = rewrite_ty(*reference.elem.clone(), &self_ty)?;
         }
         Type::Slice(slice) => {
-            *slice.elem = rewrite_ty(*slice.elem.clone(), &self_ty);
+            *slice.elem = rewrite_ty(*slice.elem.clone(), &self_ty)?;
         }
         Type::Tuple(tuple) => {
             for ty in &mut tuple.elems {
-                *ty = rewrite_ty(ty.clone(), &self_ty);
+                *ty = rewrite_ty(ty.clone(), &self_ty)?;
             }
         }
         _ => {}
     };
 
-    ty
+    Some(ty)
 }
 
 pub fn generate(mut item: ItemTrait) -> TokenStream {
@@ -169,9 +173,17 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
                 .collect();
 
             for ty in &arg_tys {
+                let span = ty.span();
+
                 let pat = *ty.pat.clone();
                 bindings.extend(quote!(#pat,));
-                let ty = rewrite_ty((*ty.ty).clone(), &self_ty);
+                let ty = if let Some(ty) = rewrite_ty((*ty.ty).clone(), &self_ty) {
+                    ty
+                } else {
+                    return quote_spanned!(span => const __DERIVE_ERROR: () = { compile_error!(
+                        "object-safe traits cannot use the `Self` type"
+                    ); };);
+                };
                 r_args.extend(quote!(#ty,));
             }
 
@@ -179,8 +191,16 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
 
             if moves {
                 for ty in &arg_tys {
+                    let span = ty.span();
+
                     let ident = format_ident!("T{}", format!("{}", ident_idx));
-                    let ty = rewrite_ty((*ty.ty).clone(), &self_ty);
+                    let ty = if let Some(ty) = rewrite_ty((*ty.ty).clone(), &self_ty) {
+                        ty
+                    } else {
+                        return quote_spanned!(span => const __DERIVE_ERROR: () = { compile_error!(
+                            "object-safe traits cannot use the `Self` type"
+                        ); };);
+                    };
                     ident_idx += 1;
                     call_generics.extend(quote!(#ident,));
                     r_generics.extend(quote!(#ty,));
@@ -233,7 +253,9 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
         let into = write_unravel_conv(structure);
 
         call.extend(quote! {
-            type __DERIVE_CALL_ALIAS<C: #ctxtualize #call_context_bounds, #call_generics> = #ty;
+            #vis struct __DERIVE_CALL_NEWTYPE<T>(#vis T);
+
+            #vis type __DERIVE_CALL_ALIAS<C: #ctxtualize #call_context_bounds, #call_generics> = #ty;
 
             impl<C: #ctxtualize #call_context_bounds, #call_generics> From<#ty> for __DERIVE_CALL<C, #call_generics> {
                 fn from(data: #ty) -> Self {
@@ -241,21 +263,28 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
                 }
             }
 
-            impl<C: #ctxtualize #call_context_bounds, #call_generics> Into<#ty> for __DERIVE_CALL<C, #call_generics> {
-                fn into(self) -> #ty {
-                    #into
+            impl<C: #ctxtualize #call_context_bounds, #call_generics> Into<__DERIVE_CALL_NEWTYPE<#ty>> for __DERIVE_CALL<C, #call_generics> {
+                fn into(self) -> __DERIVE_CALL_NEWTYPE<#ty> {
+                    __DERIVE_CALL_NEWTYPE(#into)
                 }
             }
         });
     }
 
     let coalesce = coalesce::generate(item.clone());
-    let unravel = unravel::generate(item);
 
-    quote! {
+    let mut data = quote! {
         #call
 
         #coalesce
-        #unravel
+    };
+
+    if let Ok(Item::Const(_)) = parse2::<Item>(coalesce) {
+    } else {
+        let unravel = unravel::generate(item);
+
+        data.extend(unravel);
     }
+
+    data
 }
