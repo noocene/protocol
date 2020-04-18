@@ -1,7 +1,108 @@
 use super::rewrite_ty;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote, quote_spanned};
-use syn::{parse_quote, FnArg, GenericParam, ItemTrait, ReturnType, TraitItem, spanned::Spanned};
+use syn::{
+    parse_quote, spanned::Spanned, FnArg, GenericArgument, GenericParam, ItemTrait, PathArguments,
+    ReturnType, TraitItem, Type, TypeParamBound,
+};
+
+fn desugar_object(mut ty: Type) -> Type {
+    match &mut ty {
+        Type::Array(array) => {
+            *array.elem = desugar_object(*array.elem.clone());
+        }
+        Type::Group(group) => {
+            *group.elem = desugar_object(*group.elem.clone());
+        }
+        Type::Paren(paren) => {
+            *paren.elem = desugar_object(*paren.elem.clone());
+        }
+        Type::TraitObject(object) => {
+            let mut has_lifetime = false;
+
+            for bound in &mut object.bounds {
+                match bound {
+                    TypeParamBound::Trait(bound) => {
+                        let path = bound.path.clone();
+                        let ty: Type = parse_quote!(#path);
+                        let path = desugar_object(ty);
+                        bound.path = parse_quote!(#path);
+                    }
+                    TypeParamBound::Lifetime(_) => {
+                        has_lifetime = true;
+                    }
+                }
+            }
+
+            if !has_lifetime {
+                object.bounds.push(parse_quote!('static));
+            }
+        }
+        Type::Path(path) => {
+            if let Some(qself) = &mut path.qself {
+                *qself.ty = desugar_object(*qself.ty.clone())
+            }
+
+            for segment in &mut path.path.segments {
+                match &mut segment.arguments {
+                    PathArguments::AngleBracketed(args) => {
+                        for arg in &mut args.args {
+                            match arg {
+                                GenericArgument::Type(ty) => {
+                                    *ty = desugar_object(ty.clone());
+                                }
+                                GenericArgument::Binding(binding) => {
+                                    binding.ty = desugar_object(binding.ty.clone());
+                                }
+                                GenericArgument::Constraint(constraint) => {
+                                    for bound in &mut constraint.bounds {
+                                        match bound {
+                                            TypeParamBound::Trait(bound) => {
+                                                let path = bound.path.clone();
+                                                let ty: Type = parse_quote!(#path);
+                                                let path = desugar_object(ty);
+                                                bound.path = parse_quote!(#path);
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    PathArguments::Parenthesized(args) => {
+                        for input in &mut args.inputs {
+                            *input = desugar_object(input.clone());
+                        }
+                        match &mut args.output {
+                            ReturnType::Type(_, ty) => *ty.as_mut() = desugar_object(*ty.clone()),
+                            _ => {}
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Type::Ptr(ptr) => {
+            *ptr.elem = desugar_object(*ptr.elem.clone());
+        }
+        Type::Reference(reference) => {
+            *reference.elem = desugar_object(*reference.elem.clone());
+        }
+        Type::Slice(slice) => {
+            *slice.elem = desugar_object(*slice.elem.clone());
+        }
+        Type::Tuple(tuple) => {
+            for ty in &mut tuple.elems {
+                *ty = desugar_object(ty.clone());
+            }
+        }
+        _ => {}
+    };
+
+    ty
+}
 
 pub fn generate(mut item: ItemTrait) -> TokenStream {
     let ident = &item.ident;
@@ -115,7 +216,7 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
                     let span = ty.span();
 
                     let ty = if let Some(ty) = rewrite_ty(*ty.clone(), &self_ty) {
-                        ty
+                        desugar_object(ty)
                     } else {
                         return quote_spanned!(span => const __DERIVE_ERROR: () = { compile_error!(
                             "object-safe traits cannot use the `Self` type"
@@ -306,7 +407,15 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
 
             let sig = &method.sig;
 
-            logic.push((ident.clone(), moves, get_context, ret, sig.clone(), r_args, bindings.clone()));
+            logic.push((
+                ident.clone(),
+                moves,
+                get_context,
+                ret,
+                sig.clone(),
+                r_args,
+                bindings.clone(),
+            ));
 
             if moves {
                 delegate_stream.extend(quote!(#sig {
@@ -359,7 +468,7 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
 
     if has_methods {
         r_context_bounds.extend(
-            quote! { 
+            quote! {
                 + __protocol::Write<__DERIVE_CALL_ALIAS<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>>
                 + __protocol::FinalizeImmediate<__protocol::derive_deps::Complete<__DERIVE_CALL_ALIAS<__DERIVE_PROTOCOL_TRANSPORT, #r_generics>>>
             }
@@ -414,7 +523,7 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
 
     for (ret, r_args) in ref_bounds {
         ty_where_clause.predicates.push(parse_quote! {
-            <<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context as __protocol::CloneContext>::Context: __protocol::Join<#ret> 
+            <<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context as __protocol::CloneContext>::Context: __protocol::Join<#ret>
                 + __protocol::Notify<(#r_args)>
                 + __protocol::Finalize<<<<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context as __protocol::CloneContext>::Context as __protocol::Fork<<<<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context as __protocol::CloneContext>::Context as __protocol::Notify<(#r_args)>>::Notification>>::Finalize>
                 + __protocol::Read<<<<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context as __protocol::CloneContext>::Context as __protocol::Dispatch<#ret>>::Handle>
@@ -588,7 +697,7 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
             parse_quote!(<__DERIVE_PROTOCOL_TRANSPORT as #context_trait>::Context: Sized #c_context_bounds),
         );
     }
-    
+
     type_item
         .generics
         .params
