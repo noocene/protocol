@@ -4,6 +4,8 @@ mod join_context_owned;
 pub use join_context_owned::*;
 mod join_context_shared;
 pub use join_context_shared::*;
+mod with_context;
+pub use with_context::*;
 
 #[cfg(feature = "alloc")]
 #[doc(hidden)]

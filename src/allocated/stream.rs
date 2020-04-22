@@ -786,8 +786,8 @@ macro_rules! marker_variants {
     };
 }
 
-marker_variants! {
-    ,
-    Sync,
-    Send, Sync Send
-}
+// marker_variants! {
+//     ,
+//     Sync,
+//     Send, Sync Send
+// }

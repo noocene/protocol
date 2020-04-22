@@ -7,8 +7,11 @@ use core::{
 mod map;
 pub use map::{Map, MapErr, MapOk};
 mod either;
+mod then;
 pub use either::Either;
 use either::EitherState;
+use then::ThenState;
+pub use then::{AndThen, Then};
 mod ready;
 pub use ready::{err, ok, ready, Ready};
 pub mod finalize;
@@ -65,6 +68,26 @@ pub trait FutureExt<C: ?Sized>: Future<C> {
     {
         Either {
             state: EitherState::Right(self),
+        }
+    }
+
+    fn then<F, T>(self, conv: F) -> Then<Self, F, T>
+    where
+        Self: Sized,
+    {
+        Then {
+            state: ThenState::Original(self),
+            conv: Some(conv),
+        }
+    }
+
+    fn and_then<F, T>(self, conv: F) -> AndThen<Self, F, T>
+    where
+        Self: Sized,
+    {
+        AndThen {
+            state: ThenState::Original(self),
+            conv: Some(conv),
         }
     }
 }

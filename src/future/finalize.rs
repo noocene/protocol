@@ -277,44 +277,44 @@ macro_rules! array_impl {
 
 array_impl! {
     0002
-    0003
-    0004
-    0005
-    0006
-    0007
-    0008
-    0009
-    0010
-    0011
-    0012
-    0013
-    0014
-    0015
-    0016
-    0017
-    0018
-    0019
-    0020
-    0021
-    0022
-    0023
-    0024
-    0025
-    0026
-    0027
-    0028
-    0029
-    0030
-    0031
-    0032
-    0064
-    0128
-    0256
-    0512
-    1024
-    2048
-    4096
-    8192
+    // 0003
+    // 0004
+    // 0005
+    // 0006
+    // 0007
+    // 0008
+    // 0009
+    // 0010
+    // 0011
+    // 0012
+    // 0013
+    // 0014
+    // 0015
+    // 0016
+    // 0017
+    // 0018
+    // 0019
+    // 0020
+    // 0021
+    // 0022
+    // 0023
+    // 0024
+    // 0025
+    // 0026
+    // 0027
+    // 0028
+    // 0029
+    // 0030
+    // 0031
+    // 0032
+    // 0064
+    // 0128
+    // 0256
+    // 0512
+    // 1024
+    // 2048
+    // 4096
+    // 8192
 }
 
 impl<C: ?Sized + Fork<T>, T> Futures<C> for (T,) {
@@ -475,19 +475,19 @@ macro_rules! tuple_impls {
 tuple_impls! {
     Tuple2Error  => (0 T0 1 T1)
     Tuple3Error  => (0 T0 1 T1 2 T2)
-    Tuple4Error  => (0 T0 1 T1 2 T2 3 T3)
-    Tuple5Error  => (0 T0 1 T1 2 T2 3 T3 4 T4)
-    Tuple6Error  => (0 T0 1 T1 2 T2 3 T3 4 T4 5 T5)
-    Tuple7Error  => (0 T0 1 T1 2 T2 3 T3 4 T4 5 T5 6 T6)
-    Tuple8Error  => (0 T0 1 T1 2 T2 3 T3 4 T4 5 T5 6 T6 7 T7)
-    Tuple9Error  => (0 T0 1 T1 2 T2 3 T3 4 T4 5 T5 6 T6 7 T7 8 T8)
-    Tuple10Error => (0 T0 1 T1 2 T2 3 T3 4 T4 5 T5 6 T6 7 T7 8 T8 9 T9)
-    Tuple11Error => (0 T0 1 T1 2 T2 3 T3 4 T4 5 T5 6 T6 7 T7 8 T8 9 T9 10 T10)
-    Tuple12Error => (0 T0 1 T1 2 T2 3 T3 4 T4 5 T5 6 T6 7 T7 8 T8 9 T9 10 T10 11 T11)
-    Tuple13Error => (0 T0 1 T1 2 T2 3 T3 4 T4 5 T5 6 T6 7 T7 8 T8 9 T9 10 T10 11 T11 12 T12)
-    Tuple14Error => (0 T0 1 T1 2 T2 3 T3 4 T4 5 T5 6 T6 7 T7 8 T8 9 T9 10 T10 11 T11 12 T12 13 T13)
-    Tuple15Error => (0 T0 1 T1 2 T2 3 T3 4 T4 5 T5 6 T6 7 T7 8 T8 9 T9 10 T10 11 T11 12 T12 13 T13 14 T14)
-    Tuple16Error => (0 T0 1 T1 2 T2 3 T3 4 T4 5 T5 6 T6 7 T7 8 T8 9 T9 10 T10 11 T11 12 T12 13 T13 14 T14 15 T15)
+    // Tuple4Error  => (0 T0 1 T1 2 T2 3 T3)
+    // Tuple5Error  => (0 T0 1 T1 2 T2 3 T3 4 T4)
+    // Tuple6Error  => (0 T0 1 T1 2 T2 3 T3 4 T4 5 T5)
+    // Tuple7Error  => (0 T0 1 T1 2 T2 3 T3 4 T4 5 T5 6 T6)
+    // Tuple8Error  => (0 T0 1 T1 2 T2 3 T3 4 T4 5 T5 6 T6 7 T7)
+    // Tuple9Error  => (0 T0 1 T1 2 T2 3 T3 4 T4 5 T5 6 T6 7 T7 8 T8)
+    // Tuple10Error => (0 T0 1 T1 2 T2 3 T3 4 T4 5 T5 6 T6 7 T7 8 T8 9 T9)
+    // Tuple11Error => (0 T0 1 T1 2 T2 3 T3 4 T4 5 T5 6 T6 7 T7 8 T8 9 T9 10 T10)
+    // Tuple12Error => (0 T0 1 T1 2 T2 3 T3 4 T4 5 T5 6 T6 7 T7 8 T8 9 T9 10 T10 11 T11)
+    // Tuple13Error => (0 T0 1 T1 2 T2 3 T3 4 T4 5 T5 6 T6 7 T7 8 T8 9 T9 10 T10 11 T11 12 T12)
+    // Tuple14Error => (0 T0 1 T1 2 T2 3 T3 4 T4 5 T5 6 T6 7 T7 8 T8 9 T9 10 T10 11 T11 12 T12 13 T13)
+    // Tuple15Error => (0 T0 1 T1 2 T2 3 T3 4 T4 5 T5 6 T6 7 T7 8 T8 9 T9 10 T10 11 T11 12 T12 13 T13 14 T14)
+    // Tuple16Error => (0 T0 1 T1 2 T2 3 T3 4 T4 5 T5 6 T6 7 T7 8 T8 9 T9 10 T10 11 T11 12 T12 13 T13 14 T14 15 T15)
 }
 
 #[cfg(feature = "alloc")]

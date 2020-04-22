@@ -212,13 +212,7 @@ pub fn protocol(
             }
             Item::Trait(data) => {
                 ident = Some(data.ident.clone());
-                if data.supertraits.len() > 0 {
-                    quote!(compile_error!(
-                        "invalid item: supertraits are not yet supported"
-                    ))
-                } else {
-                    object::generate(data)
-                }
+                object::generate(data)
             }
             _ => quote!(compile_error!(
                 "invalid item: expected struct, enum, or trait"

@@ -231,44 +231,44 @@ pub enum ArrayCoalesceError<T, U> {
 
 array_impl! {
     0002 as Array0002Coalesce + Array0002Unravel
-    0003 as Array0003Coalesce + Array0003Unravel
-    0004 as Array0004Coalesce + Array0004Unravel
-    0005 as Array0005Coalesce + Array0005Unravel
-    0006 as Array0006Coalesce + Array0006Unravel
-    0007 as Array0007Coalesce + Array0007Unravel
-    0008 as Array0008Coalesce + Array0008Unravel
-    0009 as Array0009Coalesce + Array0009Unravel
-    0010 as Array0010Coalesce + Array0010Unravel
-    0011 as Array0011Coalesce + Array0011Unravel
-    0012 as Array0012Coalesce + Array0012Unravel
-    0013 as Array0013Coalesce + Array0013Unravel
-    0014 as Array0014Coalesce + Array0014Unravel
-    0015 as Array0015Coalesce + Array0015Unravel
-    0016 as Array0016Coalesce + Array0016Unravel
-    0017 as Array0017Coalesce + Array0017Unravel
-    0018 as Array0018Coalesce + Array0018Unravel
-    0019 as Array0019Coalesce + Array0019Unravel
-    0020 as Array0020Coalesce + Array0020Unravel
-    0021 as Array0021Coalesce + Array0021Unravel
-    0022 as Array0022Coalesce + Array0022Unravel
-    0023 as Array0023Coalesce + Array0023Unravel
-    0024 as Array0024Coalesce + Array0024Unravel
-    0025 as Array0025Coalesce + Array0025Unravel
-    0026 as Array0026Coalesce + Array0026Unravel
-    0027 as Array0027Coalesce + Array0027Unravel
-    0028 as Array0028Coalesce + Array0028Unravel
-    0029 as Array0029Coalesce + Array0029Unravel
-    0030 as Array0030Coalesce + Array0030Unravel
-    0031 as Array0031Coalesce + Array0031Unravel
-    0032 as Array0032Coalesce + Array0032Unravel
-    0064 as Array0064Coalesce + Array0064Unravel
-    0128 as Array0128Coalesce + Array0128Unravel
-    0256 as Array0256Coalesce + Array0256Unravel
-    0512 as Array0512Coalesce + Array0512Unravel
-    1024 as Array1024Coalesce + Array1024Unravel
-    2048 as Array2048Coalesce + Array2048Unravel
-    4096 as Array4096Coalesce + Array4096Unravel
-    8192 as Array8192Coalesce + Array8192Unravel
+    // 0003 as Array0003Coalesce + Array0003Unravel
+    // 0004 as Array0004Coalesce + Array0004Unravel
+    // 0005 as Array0005Coalesce + Array0005Unravel
+    // 0006 as Array0006Coalesce + Array0006Unravel
+    // 0007 as Array0007Coalesce + Array0007Unravel
+    // 0008 as Array0008Coalesce + Array0008Unravel
+    // 0009 as Array0009Coalesce + Array0009Unravel
+    // 0010 as Array0010Coalesce + Array0010Unravel
+    // 0011 as Array0011Coalesce + Array0011Unravel
+    // 0012 as Array0012Coalesce + Array0012Unravel
+    // 0013 as Array0013Coalesce + Array0013Unravel
+    // 0014 as Array0014Coalesce + Array0014Unravel
+    // 0015 as Array0015Coalesce + Array0015Unravel
+    // 0016 as Array0016Coalesce + Array0016Unravel
+    // 0017 as Array0017Coalesce + Array0017Unravel
+    // 0018 as Array0018Coalesce + Array0018Unravel
+    // 0019 as Array0019Coalesce + Array0019Unravel
+    // 0020 as Array0020Coalesce + Array0020Unravel
+    // 0021 as Array0021Coalesce + Array0021Unravel
+    // 0022 as Array0022Coalesce + Array0022Unravel
+    // 0023 as Array0023Coalesce + Array0023Unravel
+    // 0024 as Array0024Coalesce + Array0024Unravel
+    // 0025 as Array0025Coalesce + Array0025Unravel
+    // 0026 as Array0026Coalesce + Array0026Unravel
+    // 0027 as Array0027Coalesce + Array0027Unravel
+    // 0028 as Array0028Coalesce + Array0028Unravel
+    // 0029 as Array0029Coalesce + Array0029Unravel
+    // 0030 as Array0030Coalesce + Array0030Unravel
+    // 0031 as Array0031Coalesce + Array0031Unravel
+    // 0032 as Array0032Coalesce + Array0032Unravel
+    // 0064 as Array0064Coalesce + Array0064Unravel
+    // 0128 as Array0128Coalesce + Array0128Unravel
+    // 0256 as Array0256Coalesce + Array0256Unravel
+    // 0512 as Array0512Coalesce + Array0512Unravel
+    // 1024 as Array1024Coalesce + Array1024Unravel
+    // 2048 as Array2048Coalesce + Array2048Unravel
+    // 4096 as Array4096Coalesce + Array4096Unravel
+    // 8192 as Array8192Coalesce + Array8192Unravel
 }
 
 pub enum Array0001Unravel<T: Unpin, C: ?Sized + Write<<C as Dispatch<T>>::Handle> + Fork<T> + Unpin>
