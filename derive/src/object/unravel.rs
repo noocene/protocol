@@ -1,7 +1,7 @@
 use super::rewrite_ty;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote, quote_spanned};
-use syn::{parse_quote, FnArg, GenericParam, ItemTrait, TraitItem, ReturnType, spanned::Spanned};
+use syn::{parse_quote, spanned::Spanned, FnArg, GenericParam, ItemTrait, ReturnType, TraitItem};
 
 pub fn generate(mut item: ItemTrait) -> TokenStream {
     let mut has_methods = false;
@@ -29,7 +29,7 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
     for t in &item.items {
         if let TraitItem::Method(method) = t {
             has_methods = true;
-        
+
             let m_ident = &method.sig.ident;
 
             let moves = method
@@ -94,7 +94,10 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
                 item.generics.where_clause.as_mut().unwrap().predicates.push(parse_quote!(<__protocol::RefContextTarget<__DERIVE_PROTOCOL_TRANSPORT> as __protocol::Dispatch<#ret>>::Handle: ::core::marker::Unpin));
                 let s_ident = format_ident!("__DERIVE_JOIN_{}", m_ident);
                 let e_ident = format_ident!("JOIN_{}", m_ident);
-                let message = format!("failed to join arguments by move for method `{}`: {{0}}", m_ident);
+                let message = format!(
+                    "failed to join arguments by move for method `{}`: {{0}}",
+                    m_ident
+                );
                 arms.extend(quote!(__DERIVE_CALL::#m_ident(handle) => {
                     this.state = __DERIVE_UNRAVEL_STATE::#s_ident(__protocol::Join::<__protocol::Notification<__protocol::RefContextTarget<__DERIVE_PROTOCOL_TRANSPORT>, (#bindings)>>::join(&mut *ctx, handle));
                 }));
@@ -115,7 +118,10 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
                 error_arg_tys.extend(quote!(<<__protocol::RefContextTarget<__DERIVE_PROTOCOL_TRANSPORT> as __protocol::Join<__protocol::Notification<__protocol::RefContextTarget<__DERIVE_PROTOCOL_TRANSPORT>, (#bindings)>>>::Future as __protocol::Future<__protocol::RefContextTarget<__DERIVE_PROTOCOL_TRANSPORT>>>::Error,));
                 let s_ident = format_ident!("__DERIVE_UNWRAP_{}", m_ident);
                 let e_ident = format_ident!("UNWRAP_{}", m_ident);
-                let message = format!("failed to unwrap arguments by move for method `{}`: {{0}}", m_ident);
+                let message = format!(
+                    "failed to unwrap arguments by move for method `{}`: {{0}}",
+                    m_ident
+                );
                 state.extend(quote!(#s_ident(<__protocol::RefContextTarget<__DERIVE_PROTOCOL_TRANSPORT> as __protocol::Notify<(#bindings)>>::Unwrap),));
                 let u_ident = format_ident!("__DERIVE_FORK_{}", m_ident);
                 state_arms.extend(quote! {
@@ -142,7 +148,10 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
                         this.state = __DERIVE_UNRAVEL_STATE::#k_ident(finalize);
                     }
                 });
-                let message = format!("failed to fork arguments by move for method `{}`: {{0}}", m_ident);
+                let message = format!(
+                    "failed to fork arguments by move for method `{}`: {{0}}",
+                    m_ident
+                );
                 errors.extend(quote! {
                     #[error(#message)]
                     #e_ident(#[source] #e_ident),
@@ -214,7 +223,10 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
                 finalize_items.extend(quote! {
                     #m_ident(__protocol::derive_deps::BorrowUnravel<__DERIVE_PROTOCOL_TRANSPORT, (#bindings), #ret>),
                 });
-                let message = format!("failed to contextualize sub-instance for method `{}`: {{0}}", m_ident);
+                let message = format!(
+                    "failed to contextualize sub-instance for method `{}`: {{0}}",
+                    m_ident
+                );
                 errors.extend(quote! {
                     #[error(#message)]
                     #e_ident(#[source] #e_ident),
@@ -222,7 +234,10 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
                 error_param_names.extend(quote!(#e_ident,));
                 error_params.extend(quote!(#e_ident: __protocol::derive_deps::Error + 'static,));
                 error_arg_tys.extend(quote!(<<__protocol::RefContextTarget<__DERIVE_PROTOCOL_TRANSPORT> as __protocol::ReferenceContext>::JoinOutput as __protocol::Future<__protocol::RefContextTarget<__DERIVE_PROTOCOL_TRANSPORT>>>::Error,));
-                let message = format!("failed to finalize sub-instance for method `{}`: {{0}}", m_ident);
+                let message = format!(
+                    "failed to finalize sub-instance for method `{}`: {{0}}",
+                    m_ident
+                );
                 errors.extend(quote! {
                     #[error(#message)]
                     #f_ident(#[source] #f_ident),
@@ -258,7 +273,7 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
                     ::core::marker::Unpin
             ));
         item.generics.where_clause.as_mut().unwrap().predicates.push(parse_quote! {
-            __protocol::RefContextTarget<__DERIVE_PROTOCOL_TRANSPORT>: __protocol::ReferenceContext 
+            __protocol::RefContextTarget<__DERIVE_PROTOCOL_TRANSPORT>: __protocol::ReferenceContext
                 + __protocol::Read<__DERIVE_CALL_ALIAS<__protocol::RefContextTarget<__DERIVE_PROTOCOL_TRANSPORT>, #r_generics>>
                 + ::core::marker::Unpin
         });
@@ -275,10 +290,11 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
             assoc_idents.push((item.ident.clone(), ident.clone()));
             let bounds = &item.bounds;
 
-            type_item
-                .generics
-                .params
-                .push(parse_quote!(#ident: #bounds));
+            type_item.generics.params.push(if bounds.len() != 0 {
+                parse_quote!(#ident: #bounds)
+            } else {
+                parse_quote!(#ident)
+            });
         }
     }
     let mut a = type_item.generics.clone();
@@ -327,7 +343,8 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
         type_generics = quote!(<#type_generics>);
     }
 
-    a.params.push(parse_quote!(__DERIVE_TRAIT_INSTANCE: ?Sized + #ident #type_generics));
+    a.params
+        .push(parse_quote!(__DERIVE_TRAIT_INSTANCE: ?Sized + #ident #type_generics));
     let (k_impl_generics, _, _) = a.split_for_impl();
 
     let mut k_type_generics = o_type_generics.clone();
@@ -345,10 +362,10 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
 
     let (pending_field, pending_create) = if some_by_ref {
         (
-            quote!(pending: __alloc::vec::Vec<__DERIVE_FINALIZE_ITEMS #o_type_generics>,), 
-            quote!(pending: __alloc::vec::Vec::new(),)
+            quote!(pending: __alloc::vec::Vec<__DERIVE_FINALIZE_ITEMS #o_type_generics>,),
+            quote!(pending: __alloc::vec::Vec::new(),),
         )
-    }  else {
+    } else {
         (quote!(), quote!())
     };
 

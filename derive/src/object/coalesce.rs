@@ -115,10 +115,12 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
             let ident = format_ident!("__DERIVE_ASSOC_{}", item.ident);
             assoc_idents.push((item.ident.clone(), ident.clone()));
             let mut bounds = item.bounds.clone();
-            type_item_b
-                .generics
-                .params
-                .push(parse_quote!(#ident: #bounds));
+
+            type_item_b.generics.params.push(if bounds.len() > 0 {
+                parse_quote!(#ident: #bounds)
+            } else {
+                parse_quote!(#ident)
+            });
 
             bounds.push(parse_quote!('derive_lifetime_param));
 
