@@ -356,7 +356,8 @@ pub fn generate(mut item: ItemTrait) -> TokenStream {
     }
 
     if !k_type_generics.is_empty() {
-        k_type_generics.extend(quote!(dyn #ident #type_generics + 'derive_lifetime_param,));
+        k_type_generics
+            .extend(quote!(dyn #ident #type_generics + 'derive_lifetime_param $(+ $marker)*,));
         k_type_generics = quote!(<#k_type_generics>);
     }
 
