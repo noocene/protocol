@@ -212,10 +212,10 @@ fn make_table(variants: &[VariantInfo]) -> Vec<TokenStream> {
     } else {
         if let Some(b) = b {
             let mut items = vec![];
+            items.push(quote! { None });
             for item in b {
                 items.push(quote! { Some(#item) })
             }
-            items.push(quote! { None });
             items
         } else {
             vec![quote!(true), quote!(false)]
