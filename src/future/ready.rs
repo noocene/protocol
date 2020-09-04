@@ -1,12 +1,12 @@
 use super::Future;
 use core::{
     borrow::BorrowMut,
+    convert::Infallible,
     pin::Pin,
     task::{Context, Poll},
 };
-use void::Void;
 
-pub struct Ready<T, E = Void> {
+pub struct Ready<T, E = Infallible> {
     data: Option<Result<T, E>>,
 }
 

@@ -8,7 +8,6 @@ edition = "2018"
 members = ["./derive"]
 
 [dependencies]
-void = { version = "1.0.2", default-features = false }
 futures = { version = "0.3.4", default-features = false }
 arrayvec = { version = "0.5.1", default-features = false }
 core-error = { git = "https://github.com/core-error/core-error", default-features = false }
@@ -18,4 +17,4 @@ derive = { path = "./derive" }
 [features]
 default = ["std", "alloc"]
 alloc = ["core-error/alloc"]
-std = ["alloc", "core-error/std", "core-error/std", "void/std", "derive/std"]
+std = ["alloc", "core-error/std", "core-error/std", "derive/std"]
