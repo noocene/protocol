@@ -223,19 +223,14 @@ macro_rules! tuple_impls {
                     loop {
                         match &mut this.state {
                             $ustate::None => {
-                                replace(
-                                    &mut this.state,
-                                    $ustate::$first(
-                                        ctx.fork(this.data.0.take().expect("data incomplete")),
-                                    ),
-                                );
+                                this.state = $ustate::$first(ctx.fork(this.data.0.take().expect("data incomplete")));
                             }
                             $ustate::$first(future) => {
                                 let (target, handle) = ready!(Pin::new(future).poll(cx, &mut *ctx))
                                     .map_err($u_error::$first)?;
                                 this.handles.0 = Some(handle);
                                 this.targets.data().unwrap().0 = Some(target);
-                                replace(&mut this.state, $ustate::$second(ctx.fork(this.data.1.take().expect("data incomplete"))));
+                                this.state = $ustate::$second(ctx.fork(this.data.1.take().expect("data incomplete")));
                             }
                             $($ustate::$ty(future) => {
                                 let (target, handle) = ready!(Pin::new(future).poll(cx, &mut *ctx))
@@ -243,7 +238,7 @@ macro_rules! tuple_impls {
                                 this.handles.$n = Some(handle);
                                 this.targets.data().unwrap().$n = Some(target);
 
-                                replace(&mut this.state, $ustate::$next(ctx.fork(this.data.$next_n.take().expect("data incomplete"))));
+                                this.state = $ustate::$next(ctx.fork(this.data.$next_n.take().expect("data incomplete")));
                             })+
                             $ustate::$last(future) => {
                                 let (target, handle) = ready!(Pin::new(future).poll(cx, &mut *ctx))
@@ -251,7 +246,7 @@ macro_rules! tuple_impls {
                                 this.handles.$last_n = Some(handle);
                                 this.targets.data().unwrap().$last_n = Some(target);
 
-                                replace(&mut this.state, $ustate::Writing);
+                                this.state = $ustate::Writing;
                             }
                             $ustate::Writing => {
                                 let mut ct = Pin::new(&mut *ctx);
@@ -262,19 +257,19 @@ macro_rules! tuple_impls {
                                     this.handles.$last_n.take().expect("handles incomplete"),
                                 ))
                                 .map_err($u_error::Transport)?;
-                                replace(&mut this.state, $ustate::Flushing);
+                                this.state = $ustate::Flushing;
                             }
                             $ustate::Flushing => {
                                 let mut ct = Pin::new(&mut *ctx);
                                 ready!(ct.as_mut().poll_flush(cx)).map_err($u_error::Transport)?;
                                 this.targets.complete();
-                                replace(&mut this.state, $ustate::Target);
+                                this.state = $ustate::Target;
                             }
                             $ustate::Target => {
                                 let finalize = ready!(Pin::new(&mut this.targets).poll(cx, &mut *ctx))
                                     .map_err(EventualFinalizeError::unwrap_complete)
                                     .map_err($u_error::Target)?;
-                                replace(&mut this.state, $ustate::Done);
+                                this.state = $ustate::Done;
                                 return Poll::Ready(Ok(FutureExt::<C>::map_err(finalize, $u_error::Finalize)));
                             }
                             $ustate::Done => panic!("Tuple unravel polled after completion"),
@@ -324,10 +319,7 @@ macro_rules! tuple_impls {
                                 let handles = ready!(ct.as_mut().read(cx)).map_err($c_error::Transport)?;
                                 let first = handles.0;
                                 this.handles = (None, $(Some(handles.$n),)+ Some(handles.$last_n));
-                                replace(
-                                    &mut this.state,
-                                    $cstate::$first(<C as Join<$first>>::join(ctx, first)),
-                                );
+                                this.state = $cstate::$first(<C as Join<$first>>::join(ctx, first));
                             }
                             $cstate::$first(future) => {
                                 this.data.0 = Some(
@@ -335,13 +327,10 @@ macro_rules! tuple_impls {
                                         .map_err($c_error::$first)?,
                                 );
 
-                                replace(
-                                    &mut this.state,
-                                    $cstate::$second(<C as Join<$second>>::join(
-                                        ctx,
-                                        this.handles.1.take().expect("handles incomplete"),
-                                    )),
-                                );
+                                this.state = $cstate::$second(<C as Join<$second>>::join(
+                                    ctx,
+                                    this.handles.1.take().expect("handles incomplete"),
+                                ));
                             }
                             $($cstate::$ty(future) => {
                                 this.data.$n = Some(
@@ -349,19 +338,16 @@ macro_rules! tuple_impls {
                                         .map_err($c_error::$ty)?,
                                 );
 
-                                replace(
-                                    &mut this.state,
-                                    $cstate::$next(<C as Join<$next>>::join(
-                                        ctx,
-                                        this.handles.$next_n.take().expect("handles incomplete"),
-                                    )),
-                                );
+                                this.state = $cstate::$next(<C as Join<$next>>::join(
+                                    ctx,
+                                    this.handles.$next_n.take().expect("handles incomplete"),
+                                ));
                             })+
                             $cstate::$last(future) => {
                                 let data = ready!(Pin::new(future).poll(cx, &mut *ctx))
                                     .map_err($c_error::$last)?;
 
-                                replace(&mut this.state, $cstate::Done);
+                                this.state = $cstate::Done;
 
                                 return Poll::Ready(Ok((this.data.0.take().expect("data incomplete"), $(this.data.$n.take().expect("data incomplete"),)+ data)));
                             }
@@ -572,14 +558,14 @@ pub struct Tuple2Coalesce<
 }
 
 impl<
-    T: Unpin,
-    U: Unpin,
-    C: ?Sized
-        + Write<(<C as Dispatch<T>>::Handle, <C as Dispatch<U>>::Handle)>
-        + Fork<T>
-        + Fork<U>
-        + Unpin,
-> Future<C> for Tuple2Unravel<T, U, C>
+        T: Unpin,
+        U: Unpin,
+        C: ?Sized
+            + Write<(<C as Dispatch<T>>::Handle, <C as Dispatch<U>>::Handle)>
+            + Fork<T>
+            + Fork<U>
+            + Unpin,
+    > Future<C> for Tuple2Unravel<T, U, C>
 where
     <C as Fork<T>>::Future: Unpin,
     <C as Fork<U>>::Future: Unpin,
@@ -646,11 +632,8 @@ where
         loop {
             match &mut this.state {
                 Tuple2UnravelState::None => {
-                    replace(
-                        &mut this.state,
-                        Tuple2UnravelState::T(
-                            ctx.fork(this.data.0.take().expect("data incomplete")),
-                        ),
+                    this.state = Tuple2UnravelState::T(
+                        ctx.fork(this.data.0.take().expect("data incomplete")),
                     );
                 }
                 Tuple2UnravelState::T(future) => {
@@ -658,11 +641,8 @@ where
                         .map_err(Tuple2UnravelError::DispatchT)?;
                     this.handles.0 = Some(handle);
                     this.targets.data().unwrap().0 = Some(target);
-                    replace(
-                        &mut this.state,
-                        Tuple2UnravelState::U(
-                            ctx.fork(this.data.1.take().expect("data incomplete")),
-                        ),
+                    this.state = Tuple2UnravelState::U(
+                        ctx.fork(this.data.1.take().expect("data incomplete")),
                     );
                 }
                 Tuple2UnravelState::U(future) => {
@@ -670,7 +650,7 @@ where
                         .map_err(Tuple2UnravelError::DispatchU)?;
                     this.handles.1 = Some(handle);
                     this.targets.data().unwrap().1 = Some(target);
-                    replace(&mut this.state, Tuple2UnravelState::Writing);
+                    this.state = Tuple2UnravelState::Writing;
                 }
                 Tuple2UnravelState::Writing => {
                     let mut ct = Pin::new(&mut *ctx);
@@ -680,19 +660,19 @@ where
                         this.handles.1.take().expect("handles incomplete"),
                     ))
                     .map_err(Tuple2UnravelError::Transport)?;
-                    replace(&mut this.state, Tuple2UnravelState::Flushing);
+                    this.state = Tuple2UnravelState::Flushing;
                 }
                 Tuple2UnravelState::Flushing => {
                     let mut ct = Pin::new(&mut *ctx);
                     ready!(ct.as_mut().poll_flush(cx)).map_err(Tuple2UnravelError::Transport)?;
                     this.targets.complete();
-                    replace(&mut this.state, Tuple2UnravelState::Target);
+                    this.state = Tuple2UnravelState::Target;
                 }
                 Tuple2UnravelState::Target => {
                     let finalize = ready!(Pin::new(&mut this.targets).poll(cx, &mut *ctx))
                         .map_err(EventualFinalizeError::unwrap_complete)
                         .map_err(Tuple2UnravelError::Target)?;
-                    replace(&mut this.state, Tuple2UnravelState::Done);
+                    this.state = Tuple2UnravelState::Done;
                     return Poll::Ready(Ok(FutureExt::<C>::map_err(
                         finalize,
                         Tuple2UnravelError::Finalize,
@@ -705,14 +685,14 @@ where
 }
 
 impl<
-    T: Unpin,
-    U: Unpin,
-    C: ?Sized
-        + Read<(<C as Dispatch<T>>::Handle, <C as Dispatch<U>>::Handle)>
-        + Join<T>
-        + Join<U>
-        + Unpin,
-> Future<C> for Tuple2Coalesce<T, U, C>
+        T: Unpin,
+        U: Unpin,
+        C: ?Sized
+            + Read<(<C as Dispatch<T>>::Handle, <C as Dispatch<U>>::Handle)>
+            + Join<T>
+            + Join<U>
+            + Unpin,
+    > Future<C> for Tuple2Coalesce<T, U, C>
 where
     <C as Join<T>>::Future: Unpin,
     <C as Join<U>>::Future: Unpin,
@@ -743,10 +723,7 @@ where
                         ready!(ct.as_mut().read(cx)).map_err(Tuple2CoalesceError::Transport)?;
                     let first = handles.0;
                     this.handles = (None, Some(handles.1));
-                    replace(
-                        &mut this.state,
-                        Tuple2CoalesceState::T(<C as Join<T>>::join(ctx, first)),
-                    );
+                    this.state = Tuple2CoalesceState::T(<C as Join<T>>::join(ctx, first));
                 }
                 Tuple2CoalesceState::T(future) => {
                     this.data.0 = Some(
@@ -754,19 +731,16 @@ where
                             .map_err(Tuple2CoalesceError::DispatchT)?,
                     );
 
-                    replace(
-                        &mut this.state,
-                        Tuple2CoalesceState::U(<C as Join<U>>::join(
-                            ctx,
-                            this.handles.1.take().expect("handles incomplete"),
-                        )),
-                    );
+                    this.state = Tuple2CoalesceState::U(<C as Join<U>>::join(
+                        ctx,
+                        this.handles.1.take().expect("handles incomplete"),
+                    ));
                 }
                 Tuple2CoalesceState::U(future) => {
                     let data = ready!(Pin::new(future).poll(cx, &mut *ctx))
                         .map_err(Tuple2CoalesceError::DispatchU)?;
 
-                    replace(&mut this.state, Tuple2CoalesceState::Done);
+                    this.state = Tuple2CoalesceState::Done;
 
                     return Poll::Ready(Ok((this.data.0.take().expect("data incomplete"), data)));
                 }
@@ -777,14 +751,14 @@ where
 }
 
 impl<
-    T: Unpin,
-    U: Unpin,
-    C: ?Sized
-        + Write<(<C as Dispatch<T>>::Handle, <C as Dispatch<U>>::Handle)>
-        + Fork<T>
-        + Fork<U>
-        + Unpin,
-> Unravel<C> for (T, U)
+        T: Unpin,
+        U: Unpin,
+        C: ?Sized
+            + Write<(<C as Dispatch<T>>::Handle, <C as Dispatch<U>>::Handle)>
+            + Fork<T>
+            + Fork<U>
+            + Unpin,
+    > Unravel<C> for (T, U)
 where
     <C as Fork<T>>::Future: Unpin,
     <C as Fork<U>>::Future: Unpin,
@@ -838,14 +812,14 @@ where
 }
 
 impl<
-    T: Unpin,
-    U: Unpin,
-    C: ?Sized
-        + Read<(<C as Dispatch<T>>::Handle, <C as Dispatch<U>>::Handle)>
-        + Join<T>
-        + Join<U>
-        + Unpin,
-> Coalesce<C> for (T, U)
+        T: Unpin,
+        U: Unpin,
+        C: ?Sized
+            + Read<(<C as Dispatch<T>>::Handle, <C as Dispatch<U>>::Handle)>
+            + Join<T>
+            + Join<U>
+            + Unpin,
+    > Coalesce<C> for (T, U)
 where
     <C as Join<T>>::Future: Unpin,
     <C as Join<U>>::Future: Unpin,
@@ -978,7 +952,7 @@ where
                 FlatUnravelState::Data(_) => {
                     let data = replace(&mut this.state, FlatUnravelState::Done);
                     if let FlatUnravelState::Data(data) = data {
-                        replace(&mut this.state, FlatUnravelState::Fork(ctx.fork(data)));
+                        this.state = FlatUnravelState::Fork(ctx.fork(data));
                     } else {
                         panic!("invalid state in FlatUnravel Data")
                     }
@@ -986,7 +960,7 @@ where
                 FlatUnravelState::Fork(future) => {
                     let (target, handle) = ready!(Pin::new(&mut *future).poll(cx, &mut *ctx))
                         .map_err(FlatUnravelError::Dispatch)?;
-                    replace(&mut this.state, FlatUnravelState::Write(handle, target));
+                    this.state = FlatUnravelState::Write(handle, target);
                 }
                 FlatUnravelState::Write(_, _) => {
                     let mut ctx = Pin::new(&mut *ctx);
@@ -994,7 +968,7 @@ where
                     let data = replace(&mut this.state, FlatUnravelState::Done);
                     if let FlatUnravelState::Write(data, target) = data {
                         ctx.write(data).map_err(FlatUnravelError::Transport)?;
-                        replace(&mut this.state, FlatUnravelState::Flush(target));
+                        this.state = FlatUnravelState::Flush(target);
                     } else {
                         panic!("invalid state in FlatUnravel Write")
                     }
@@ -1004,7 +978,7 @@ where
                         .map_err(FlatUnravelError::Transport)?;
                     let data = replace(&mut this.state, FlatUnravelState::Done);
                     if let FlatUnravelState::Flush(target) = data {
-                        replace(&mut this.state, FlatUnravelState::Target(target));
+                        this.state = FlatUnravelState::Target(target);
                     } else {
                         panic!("invalid state in FlatUnravel Write")
                     }
@@ -1012,7 +986,7 @@ where
                 FlatUnravelState::Target(target) => {
                     let finalize =
                         ready!(Pin::new(target).poll(cx, ctx)).map_err(FlatUnravelError::Target)?;
-                    replace(&mut this.state, FlatUnravelState::Done);
+                    this.state = FlatUnravelState::Done;
                     return Poll::Ready(Ok(finalize.map_err(FlatUnravelError::Target)));
                 }
                 FlatUnravelState::Done => panic!("FlatUnravel polled after completion"),
@@ -1045,12 +1019,12 @@ where
                     let mut ctx = Pin::new(&mut *ctx);
                     let handle =
                         ready!(ctx.as_mut().read(cx)).map_err(FlatCoalesceError::Transport)?;
-                    replace(&mut this.state, FlatCoalesceState::Join(ctx.join(handle)));
+                    this.state = FlatCoalesceState::Join(ctx.join(handle));
                 }
                 FlatCoalesceState::Join(future) => {
                     let item = ready!(Pin::new(future).poll(cx, &mut *ctx))
                         .map_err(FlatCoalesceError::Dispatch)?;
-                    replace(&mut this.state, FlatCoalesceState::Done);
+                    this.state = FlatCoalesceState::Done;
                     return Poll::Ready(Ok(item));
                 }
                 FlatCoalesceState::Done => panic!("FlatUnravel polled after completion"),

@@ -114,12 +114,12 @@ where
                     let mut ctx = Pin::new(&mut *ctx);
                     ready!(ctx.as_mut().poll_ready(cx)).map_err(OptionUnravelError::Transport)?;
                     ctx.write(None).map_err(OptionUnravelError::Transport)?;
-                    replace(this, OptionUnravel::Flush(None));
+                    *this = OptionUnravel::Flush(None);
                 }
                 OptionUnravel::Some(_) => {
                     let data = replace(this, OptionUnravel::Done);
                     if let OptionUnravel::Some(data) = data {
-                        replace(this, OptionUnravel::Fork(ctx.fork(data)));
+                        *this = OptionUnravel::Fork(ctx.fork(data));
                     } else {
                         panic!("invalid state in OptionUnravel Some")
                     }
@@ -127,7 +127,7 @@ where
                 OptionUnravel::Fork(future) => {
                     let (target, handle) = ready!(Pin::new(&mut *future).poll(cx, &mut *ctx))
                         .map_err(OptionUnravelError::Dispatch)?;
-                    replace(this, OptionUnravel::Write(handle, target));
+                    *this = OptionUnravel::Write(handle, target);
                 }
                 OptionUnravel::Write(_, _) => {
                     let mut ctx = Pin::new(&mut *ctx);
@@ -136,7 +136,7 @@ where
                     if let OptionUnravel::Write(data, target) = data {
                         ctx.write(Some(data))
                             .map_err(OptionUnravelError::Transport)?;
-                        replace(this, OptionUnravel::Flush(Some(target)));
+                        *this = OptionUnravel::Flush(Some(target));
                     } else {
                         panic!("invalid state in OptionUnravel Write")
                     }
@@ -147,9 +147,9 @@ where
                     let data = replace(this, OptionUnravel::Done);
                     if let OptionUnravel::Flush(target) = data {
                         if let Some(target) = target {
-                            replace(this, OptionUnravel::Target(target));
+                            *this = OptionUnravel::Target(target);
                         } else {
-                            replace(this, OptionUnravel::Done);
+                            *this = OptionUnravel::Done;
                             return Poll::Ready(Ok(FutureExt::<C>::into_right(ok(()))));
                         }
                     } else {
@@ -159,7 +159,7 @@ where
                 OptionUnravel::Target(future) => {
                     let finalize = ready!(Pin::new(&mut *future).poll(cx, &mut *ctx))
                         .map_err(OptionUnravelError::Target)?;
-                    replace(this, OptionUnravel::Done);
+                    *this = OptionUnravel::Done;
                     return Poll::Ready(Ok(FutureExt::<C>::into_left(
                         finalize.map_err(OptionUnravelError::Finalize),
                     )));
@@ -194,11 +194,11 @@ where
                     let mut ctx = Pin::new(&mut *ctx);
                     match ready!(ctx.as_mut().read(cx)).map_err(OptionCoalesceError::Transport)? {
                         None => {
-                            replace(this, OptionCoalesce::Done);
+                            *this = OptionCoalesce::Done;
                             return Poll::Ready(Ok(None));
                         }
                         Some(handle) => {
-                            replace(this, OptionCoalesce::Join(ctx.join(handle)));
+                            *this = OptionCoalesce::Join(ctx.join(handle));
                         }
                     }
                 }

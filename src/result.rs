@@ -60,14 +60,14 @@ pub enum ResultCoalesce<
 }
 
 impl<
-    T: Unpin,
-    E: Unpin,
-    C: ?Sized
-        + Write<Result<<C as Dispatch<T>>::Handle, <C as Dispatch<E>>::Handle>>
-        + Fork<T>
-        + Fork<E>
-        + Unpin,
-> From<Result<T, E>> for ResultUnravel<T, E, C>
+        T: Unpin,
+        E: Unpin,
+        C: ?Sized
+            + Write<Result<<C as Dispatch<T>>::Handle, <C as Dispatch<E>>::Handle>>
+            + Fork<T>
+            + Fork<E>
+            + Unpin,
+    > From<Result<T, E>> for ResultUnravel<T, E, C>
 {
     fn from(data: Result<T, E>) -> Self {
         match data {
@@ -122,14 +122,14 @@ pub enum ResultUnravelError<T, E, U, V, W, X, Y> {
 }
 
 impl<
-    T: Unpin,
-    E: Unpin,
-    C: ?Sized
-        + Write<Result<<C as Dispatch<T>>::Handle, <C as Dispatch<E>>::Handle>>
-        + Fork<T>
-        + Fork<E>
-        + Unpin,
-> Future<C> for ResultUnravel<T, E, C>
+        T: Unpin,
+        E: Unpin,
+        C: ?Sized
+            + Write<Result<<C as Dispatch<T>>::Handle, <C as Dispatch<E>>::Handle>>
+            + Fork<T>
+            + Fork<E>
+            + Unpin,
+    > Future<C> for ResultUnravel<T, E, C>
 where
     <C as Fork<T>>::Future: Unpin,
     <C as Fork<E>>::Future: Unpin,
@@ -166,7 +166,7 @@ where
                 ResultUnravel::Ok(_) => {
                     let data = replace(this, ResultUnravel::Done);
                     if let ResultUnravel::Ok(data) = data {
-                        replace(this, ResultUnravel::OkFork(ctx.fork(data)));
+                        *this = ResultUnravel::OkFork(ctx.fork(data));
                     } else {
                         panic!("invalid state in ResultUnravel Some")
                     }
@@ -174,12 +174,12 @@ where
                 ResultUnravel::OkFork(future) => {
                     let (target, handle) = ready!(Pin::new(&mut *future).poll(cx, &mut *ctx))
                         .map_err(ResultUnravelError::DispatchOk)?;
-                    replace(this, ResultUnravel::OkWrite(handle, target));
+                    *this = ResultUnravel::OkWrite(handle, target);
                 }
                 ResultUnravel::Err(_) => {
                     let data = replace(this, ResultUnravel::Done);
                     if let ResultUnravel::Err(data) = data {
-                        replace(this, ResultUnravel::ErrFork(ctx.fork(data)));
+                        *this = ResultUnravel::ErrFork(ctx.fork(data));
                     } else {
                         panic!("invalid state in ResultUnravel Some")
                     }
@@ -187,7 +187,7 @@ where
                 ResultUnravel::ErrFork(future) => {
                     let (target, handle) = ready!(Pin::new(&mut *future).poll(cx, &mut *ctx))
                         .map_err(ResultUnravelError::DispatchErr)?;
-                    replace(this, ResultUnravel::ErrWrite(handle, target));
+                    *this = ResultUnravel::ErrWrite(handle, target);
                 }
                 ResultUnravel::OkWrite(_, _) => {
                     let mut ctx = Pin::new(&mut *ctx);
@@ -195,7 +195,7 @@ where
                     let data = replace(this, ResultUnravel::Done);
                     if let ResultUnravel::OkWrite(data, target) = data {
                         ctx.write(Ok(data)).map_err(ResultUnravelError::Transport)?;
-                        replace(this, ResultUnravel::OkFlush(target));
+                        *this = ResultUnravel::OkFlush(target);
                     } else {
                         panic!("invalid state in ResultUnravel Write")
                     }
@@ -207,7 +207,7 @@ where
                     if let ResultUnravel::ErrWrite(data, target) = data {
                         ctx.write(Err(data))
                             .map_err(ResultUnravelError::Transport)?;
-                        replace(this, ResultUnravel::ErrFlush(target));
+                        *this = ResultUnravel::ErrFlush(target);
                     } else {
                         panic!("invalid state in ResultUnravel Write")
                     }
@@ -217,7 +217,7 @@ where
                         .map_err(ResultUnravelError::Transport)?;
                     let data = replace(this, ResultUnravel::Done);
                     if let ResultUnravel::OkFlush(target) = data {
-                        replace(this, ResultUnravel::OkTarget(target));
+                        *this = ResultUnravel::OkTarget(target);
                     } else {
                         panic!("invalid state in ResultUnravel Write")
                     }
@@ -227,7 +227,7 @@ where
                         .map_err(ResultUnravelError::Transport)?;
                     let data = replace(this, ResultUnravel::Done);
                     if let ResultUnravel::ErrFlush(target) = data {
-                        replace(this, ResultUnravel::ErrTarget(target));
+                        *this = ResultUnravel::ErrTarget(target);
                     } else {
                         panic!("invalid state in ResultUnravel Write")
                     }
@@ -235,7 +235,7 @@ where
                 ResultUnravel::OkTarget(target) => {
                     let finalize = ready!(Pin::new(target).poll(cx, &mut *ctx))
                         .map_err(ResultUnravelError::TargetOk)?;
-                    replace(this, ResultUnravel::Done);
+                    *this = ResultUnravel::Done;
                     return Poll::Ready(Ok(FutureExt::<C>::into_left(
                         finalize.map_err(ResultUnravelError::FinalizeOk),
                     )));
@@ -243,7 +243,7 @@ where
                 ResultUnravel::ErrTarget(target) => {
                     let finalize = ready!(Pin::new(target).poll(cx, &mut *ctx))
                         .map_err(ResultUnravelError::TargetErr)?;
-                    replace(this, ResultUnravel::Done);
+                    *this = ResultUnravel::Done;
                     return Poll::Ready(Ok(FutureExt::<C>::into_right(
                         finalize.map_err(ResultUnravelError::FinalizeErr),
                     )));
@@ -255,14 +255,14 @@ where
 }
 
 impl<
-    T: Unpin,
-    E: Unpin,
-    C: ?Sized
-        + Read<Result<<C as Dispatch<T>>::Handle, <C as Dispatch<E>>::Handle>>
-        + Join<T>
-        + Join<E>
-        + Unpin,
-> Future<C> for ResultCoalesce<T, E, C>
+        T: Unpin,
+        E: Unpin,
+        C: ?Sized
+            + Read<Result<<C as Dispatch<T>>::Handle, <C as Dispatch<E>>::Handle>>
+            + Join<T>
+            + Join<E>
+            + Unpin,
+    > Future<C> for ResultCoalesce<T, E, C>
 where
     <C as Join<T>>::Future: Unpin,
     <C as Join<E>>::Future: Unpin,
@@ -291,16 +291,10 @@ where
                     let mut p_ctx = Pin::new(&mut *ctx);
                     match ready!(p_ctx.as_mut().read(cx)).map_err(ResultCoalesceError::Transport)? {
                         Ok(data) => {
-                            replace(
-                                this,
-                                ResultCoalesce::OkJoin(<C as Join<T>>::join(ctx, data)),
-                            );
+                            *this = ResultCoalesce::OkJoin(<C as Join<T>>::join(ctx, data));
                         }
                         Err(data) => {
-                            replace(
-                                this,
-                                ResultCoalesce::ErrJoin(<C as Join<E>>::join(ctx, data)),
-                            );
+                            *this = ResultCoalesce::ErrJoin(<C as Join<E>>::join(ctx, data));
                         }
                     }
                 }
@@ -319,14 +313,14 @@ where
 }
 
 impl<
-    T: Unpin,
-    E: Unpin,
-    C: ?Sized
-        + Write<Result<<C as Dispatch<T>>::Handle, <C as Dispatch<E>>::Handle>>
-        + Fork<T>
-        + Fork<E>
-        + Unpin,
-> Unravel<C> for Result<T, E>
+        T: Unpin,
+        E: Unpin,
+        C: ?Sized
+            + Write<Result<<C as Dispatch<T>>::Handle, <C as Dispatch<E>>::Handle>>
+            + Fork<T>
+            + Fork<E>
+            + Unpin,
+    > Unravel<C> for Result<T, E>
 where
     <C as Fork<T>>::Future: Unpin,
     <C as Fork<E>>::Future: Unpin,
@@ -355,14 +349,14 @@ where
 }
 
 impl<
-    T: Unpin,
-    E: Unpin,
-    C: ?Sized
-        + Read<Result<<C as Dispatch<T>>::Handle, <C as Dispatch<E>>::Handle>>
-        + Join<T>
-        + Join<E>
-        + Unpin,
-> Coalesce<C> for Result<T, E>
+        T: Unpin,
+        E: Unpin,
+        C: ?Sized
+            + Read<Result<<C as Dispatch<T>>::Handle, <C as Dispatch<E>>::Handle>>
+            + Join<T>
+            + Join<E>
+            + Unpin,
+    > Coalesce<C> for Result<T, E>
 where
     <C as Join<T>>::Future: Unpin,
     <C as Join<E>>::Future: Unpin,

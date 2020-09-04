@@ -327,7 +327,7 @@ where
                 Array0001Unravel::Data(_) => {
                     let data = replace(this, Array0001Unravel::Done);
                     if let Array0001Unravel::Data(data) = data {
-                        replace(this, Array0001Unravel::Fork(ctx.fork(data)));
+                        *this = Array0001Unravel::Fork(ctx.fork(data));
                     } else {
                         panic!("invalid state in Array0001Unravel Data")
                     }
@@ -335,7 +335,7 @@ where
                 Array0001Unravel::Fork(future) => {
                     let (target, handle) = ready!(Pin::new(&mut *future).poll(cx, &mut *ctx))
                         .map_err(ArrayUnravelError::Dispatch)?;
-                    replace(this, Array0001Unravel::Write(handle, target));
+                    *this = Array0001Unravel::Write(handle, target);
                 }
                 Array0001Unravel::Write(_, _) => {
                     let mut ctx = Pin::new(&mut *ctx);
@@ -343,7 +343,7 @@ where
                     let data = replace(this, Array0001Unravel::Done);
                     if let Array0001Unravel::Write(data, target) = data {
                         ctx.write(data).map_err(ArrayUnravelError::Transport)?;
-                        replace(this, Array0001Unravel::Flush(target));
+                        *this = Array0001Unravel::Flush(target);
                     } else {
                         panic!("invalid state in Array0001Unravel Write")
                     }
@@ -353,7 +353,7 @@ where
                         .map_err(ArrayUnravelError::Transport)?;
                     let data = replace(this, Array0001Unravel::Done);
                     if let Array0001Unravel::Flush(target) = data {
-                        replace(this, Array0001Unravel::Target(target));
+                        *this = Array0001Unravel::Target(target);
                     } else {
                         panic!("invalid state in Array0001Unravel Write")
                     }
@@ -361,7 +361,7 @@ where
                 Array0001Unravel::Target(target) => {
                     let finalize = ready!(Pin::new(target).poll(cx, ctx))
                         .map_err(ArrayUnravelError::Target)?;
-                    replace(this, Array0001Unravel::Done);
+                    *this = Array0001Unravel::Done;
                     return Poll::Ready(Ok(finalize.map_err(ArrayUnravelError::Finalize)));
                 }
                 Array0001Unravel::Done => panic!("Array0001Unravel polled after completion"),
@@ -394,7 +394,7 @@ where
                     let mut ctx = Pin::new(&mut *ctx);
                     let handle =
                         ready!(ctx.as_mut().read(cx)).map_err(ArrayCoalesceError::Transport)?;
-                    replace(this, Array0001Coalesce::Join(ctx.join(handle)));
+                    *this = Array0001Coalesce::Join(ctx.join(handle));
                 }
                 Array0001Coalesce::Join(future) => {
                     return Poll::Ready(Ok([ready!(Pin::new(future).poll(cx, &mut *ctx))
