@@ -1,0 +1,3 @@
+var N = null;var sourcesIndex = {};
+sourcesIndex["protocol"] = {"name":"","dirs":[{"name":"adapter","files":["default.rs","mod.rs"]},{"name":"allocated","dirs":[{"name":"functions","files":["fn_once.rs","mod.rs"]}],"files":["error.rs","future.rs","mod.rs","stream.rs","vec.rs"]},{"name":"future","files":["either.rs","finalize.rs","map.rs","mod.rs","ready.rs"]},{"name":"util","dirs":[{"name":"derive_deps","files":["borrow_coalesce.rs","borrow_unravel.rs","complete.rs","mod.rs","move_coalesce.rs"]}],"files":["fork_context_ref.rs","join_context_owned.rs","join_context_shared.rs","mod.rs"]}],"files":["arrays.rs","lib.rs","option.rs","primitives.rs","result.rs","tuples.rs"]};
+createSourceSidebar();
